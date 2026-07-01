@@ -1,0 +1,312 @@
+package pages
+
+import "mnemo/internal/vcard"
+
+templ vcardTypeOpts(sel string) {
+@VCardTypeOptions(sel)
+}
+
+templ phoneOpts(sel string) {
+if sel == "HOME" {
+<option value="HOME" selected>Home</option>
+} else {
+<option value="HOME">Home</option>
+}
+if sel == "WORK" {
+<option value="WORK" selected>Work</option>
+} else {
+<option value="WORK">Work</option>
+}
+if sel == "CELL" {
+<option value="CELL" selected>Mobile</option>
+} else {
+<option value="CELL">Mobile</option>
+}
+if sel == "FAX" {
+<option value="FAX" selected>Fax</option>
+} else {
+<option value="FAX">Fax</option>
+}
+if sel == "OTHER" {
+<option value="OTHER" selected>Other</option>
+} else {
+<option value="OTHER">Other</option>
+}
+}
+
+templ emailOpts(sel string) {
+if sel == "HOME" {
+<option value="HOME" selected>Personal</option>
+} else {
+<option value="HOME">Personal</option>
+}
+if sel == "WORK" {
+<option value="WORK" selected>Work</option>
+} else {
+<option value="WORK">Work</option>
+}
+if sel == "INTERNET" {
+<option value="INTERNET" selected>Other</option>
+} else {
+<option value="INTERNET">Other</option>
+}
+}
+
+templ ContactForm(vc *vcard.VCard, action string, errorMsg string) {
+if errorMsg != "" {
+<div class="mb-4 p-3 rounded bg-red-50 border border-red-200 text-red-700 text-sm" role="alert">{ errorMsg }</div>
+}
+
+<form method="POST" action={ action } class="flex flex-col gap-4">
+    <div class="flex gap-4">
+        <div class="flex-1 space-y-4">
+            <div class="flex gap-2">
+                <div class="flex-1">
+                    <label for="first_name" class="block text-sm font-medium mb-1">First Name</label>
+                    <input type="text" id="first_name" name="first_name" value={ vcard.ParseFirstName(vc.Name) }
+                        class="w-full px-3 py-2 border border-border rounded text-sm" placeholder="John" />
+                </div>
+                <div class="flex-1">
+                    <label for="last_name" class="block text-sm font-medium mb-1">Last Name</label>
+                    <input type="text" id="last_name" name="last_name" value={ vcard.ParseLastName(vc.Name) }
+                        class="w-full px-3 py-2 border border-border rounded text-sm" placeholder="Doe" />
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <div class="flex-1">
+                    <label for="middle_name" class="block text-sm font-medium mb-1">Middle Name</label>
+                    <input type="text" id="middle_name" name="middle_name" value={ vcard.ParseMiddleName(vc.Name) }
+                        class="w-full px-3 py-2 border border-border rounded text-sm" placeholder="Marie" />
+                </div>
+                <div class="w-24">
+                    <label for="prefix" class="block text-sm font-medium mb-1">Prefix</label>
+                    <input type="text" id="prefix" name="prefix" value={ vcard.ParsePrefix(vc.Name) }
+                        class="w-full px-3 py-2 border border-border rounded text-sm" placeholder="Dr." />
+                </div>
+                <div class="w-24">
+                    <label for="suffix" class="block text-sm font-medium mb-1">Suffix</label>
+                    <input type="text" id="suffix" name="suffix" value={ vcard.ParseSuffix(vc.Name) }
+                        class="w-full px-3 py-2 border border-border rounded text-sm" placeholder="PhD" />
+                </div>
+            </div>
+            <div>
+                <label for="display_name" class="block text-sm font-medium mb-1">Display Name</label>
+                <input type="text" id="display_name" name="display_name" value={ vcard.ComposeDisplayName(vc.Name, "" )
+                    } class="w-full px-3 py-2 border border-border rounded text-sm bg-muted/30" placeholder="John Doe"
+                    readonly />
+            </div>
+        </div>
+
+        <div class="w-40 shrink-0">
+            <label class="block text-sm font-medium mb-1">Photo</label>
+            <div class="border border-border rounded-lg p-2 text-center">
+                if vc.Photo != "" {
+                <img src={ vcard.PhotoURL(vc) } class="w-full h-auto rounded mb-2" alt="Photo" id="photo-preview" />
+                } else {
+                <div id="photo-preview"
+                    class="w-full aspect-square bg-muted rounded mb-2 flex items-center justify-center text-muted-foreground text-xs">
+                    No photo</div>
+                }
+                <input type="file" accept="image/*" id="photo-input" class="text-xs w-full"
+                    onchange="resizePhoto(this)" />
+                <input type="hidden" name="photo_b64" id="photo_b64" value={ vc.Photo } />
+                <input type="hidden" name="photo_type" id="photo_type" value={ vc.PhotoType } />
+            </div>
+        </div>
+    </div>
+
+    <fieldset>
+        <legend class="text-sm font-medium mb-2">Phone Numbers</legend>
+        <div id="phones">
+            for _, p := range vc.Phones {
+            <div class="flex gap-2 items-center mb-2">
+                <select name="phone_type[]"
+                    class="h-9 px-2 border border-border rounded text-sm w-28 bg-white">@phoneOpts(p.Type)</select>
+                <div class="relative flex-1">
+                    <input type="tel" name="phone_value[]" value={ p.Value }
+                        class="w-full h-9 px-3 pr-8 border border-border rounded text-sm" />
+                    <button type="button"
+                        class="absolute right-1 top-1/2 -translate-y-1/2 opacity-30 hover:opacity-100 transition-opacity text-red-500 text-lg leading-none px-1"
+                        onclick="this.parentElement.parentElement.remove()">&times;</button>
+                </div>
+            </div>
+            }
+            if len(vc.Phones) == 0 {
+            <div class="flex gap-2 items-center mb-2">
+                <select name="phone_type[]"
+                    class="h-9 px-2 border border-border rounded text-sm w-28 bg-white">@phoneOpts("")</select>
+                <div class="relative flex-1">
+                    <input type="tel" name="phone_value[]"
+                        class="w-full h-9 px-3 pr-8 border border-border rounded text-sm" />
+                    <button type="button"
+                        class="absolute right-1 top-1/2 -translate-y-1/2 opacity-30 hover:opacity-100 transition-opacity text-red-500 text-lg leading-none px-1"
+                        onclick="this.parentElement.parentElement.remove()">&times;</button>
+                </div>
+            </div>
+            }
+        </div>
+        <button type="button" class="mt-1 text-sm text-primary hover:underline" onclick="addField('phones')">+
+            Add phone</button>
+    </fieldset>
+
+    <fieldset>
+        <legend class="text-sm font-medium mb-2">Emails</legend>
+        <div id="emails">
+            for _, e := range vc.Emails {
+            <div class="flex gap-2 items-center mb-2">
+                <select name="email_type[]"
+                    class="h-9 px-2 border border-border rounded text-sm w-28 bg-white">@emailOpts(e.Type)</select>
+                <div class="relative flex-1">
+                    <input type="email" name="email_value[]" value={ e.Value }
+                        class="w-full h-9 px-3 pr-8 border border-border rounded text-sm" />
+                    <button type="button"
+                        class="absolute right-1 top-1/2 -translate-y-1/2 opacity-30 hover:opacity-100 transition-opacity text-red-500 text-lg leading-none px-1"
+                        onclick="this.parentElement.parentElement.remove()">&times;</button>
+                </div>
+            </div>
+            }
+            if len(vc.Emails) == 0 {
+            <div class="flex gap-2 items-center mb-2">
+                <select name="email_type[]"
+                    class="h-9 px-2 border border-border rounded text-sm w-28 bg-white">@emailOpts("")</select>
+                <div class="relative flex-1">
+                    <input type="email" name="email_value[]"
+                        class="w-full h-9 px-3 pr-8 border border-border rounded text-sm" />
+                    <button type="button"
+                        class="absolute right-1 top-1/2 -translate-y-1/2 opacity-30 hover:opacity-100 transition-opacity text-red-500 text-lg leading-none px-1"
+                        onclick="if(this.parentElement.parentElement.parentElement.children.length>1)this.parentElement.parentElement.remove()">&times;</button>
+                </div>
+            </div>
+            }
+            <button type="button" class="mt-1 text-sm text-primary hover:underline" onclick="addField('emails')">+
+                Add email</button>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend class="text-sm font-medium mb-2">Other Fields</legend>
+        <div id="extra">
+            for _, x := range vc.Extra {
+            <div class="flex gap-2 items-center mb-2">
+                <select name="extra_name[]"
+                    class="h-9 px-2 border border-border rounded text-sm w-36 bg-white">@vcardTypeOpts(x.Name)</select>
+                <div class="relative flex-[2]">
+                    <input type="text" name="extra_value[]" value={ x.Value }
+                        class="w-full h-9 px-3 pr-8 border border-border rounded text-sm" placeholder="value" />
+                    <button type="button"
+                        class="absolute right-1 top-1/2 -translate-y-1/2 opacity-30 hover:opacity-100 transition-opacity text-red-500 text-lg leading-none px-1"
+                        onclick="this.parentElement.parentElement.remove()">&times;</button>
+                </div>
+            </div>
+            }
+
+            if len(vc.Extra) == 0 {
+            <div class="flex gap-2 items-center mb-2">
+                <select name="extra_name[]"
+                    class="h-9 px-2 border border-border rounded text-sm w-36 bg-white">@vcardTypeOpts("")</select>
+                <div class="relative flex-[2]">
+                    <input type="text" name="extra_value[]"
+                        class="w-full h-9 px-3 pr-8 border border-border rounded text-sm" placeholder="value" />
+                </div>
+            </div>
+            }
+        </div>
+        <button type="button" class="mt-1 text-sm text-primary hover:underline" onclick="addField('extra')">+
+            Add field</button>
+    </fieldset>
+
+    <div>
+        <label for="note" class="block text-sm font-medium mb-1">Notes</label>
+        <textarea id="note" name="note" rows="3"
+            class="w-full px-3 py-2 border border-border rounded text-sm">{ vc.Note }</textarea>
+    </div>
+
+    <div class="flex gap-3 justify-end pt-2">
+        <button type="button" class="py-2 px-4 border border-border rounded text-sm hover:bg-muted transition-colors"
+            onclick="window.__closeModal()">Cancel</button>
+        <button type="submit"
+            class="py-2 px-4 bg-primary text-primary-foreground text-sm font-medium rounded hover:bg-amber-600 transition-colors">Save</button>
+    </div>
+</form>
+<script>
+    function addField(containerId) {
+        var c = document.getElementById(containerId); if (!c) return;
+        var rows = c.querySelectorAll(':scope > div');
+        if (rows.length > 0) {
+            var clone = rows[rows.length - 1].cloneNode(true);
+            clone.querySelectorAll('[name]').forEach(function (el) {
+                if (el.tagName === 'INPUT' && el.type !== 'hidden') el.value = '';
+                if (el.tagName === 'SELECT') el.selectedIndex = 0;
+            });
+            c.appendChild(clone);
+            return;
+        }
+        if (containerId === 'extra') {
+            var html = '<div class="flex gap-2 items-center mb-2">' +
+                '<select name="extra_name[]" class="h-9 px-2 border border-border rounded text-sm w-36 bg-white">';
+
+            var opts = ['', 'TEL', 'EMAIL', 'IMPP', 'URL', 'NICKNAME', 'BDAY', 'ANNIVERSARY', 'GENDER', 'LANG', 'TZ',
+                'ROLE', 'ORG', 'TITLE', 'LOGO', 'KEY', 'ADR', 'GEO', 'RELATED', 'MEMBER', 'UID', 'PRODID',
+                'CALURI', 'FBURL', 'CATEGORIES', 'NOTE', 'SOUND'
+            ];
+            opts.forEach(function (v) {
+                html += '<option value="' + v + '">' + (v || '-- Select --') + '</option>';
+            });
+            html += '</select>' +
+                '<div class="relative flex-[2]">' +
+                '<input type="text" name="extra_value[]" class="w-full h-9 px-3 pr-8 border border-border rounded text-sm" placeholder="value" />' +
+                '<button type="button" class="absolute right-1 top-1/2 -translate-y-1/2 opacity-30 hover:opacity-100 transition-opacity text-red-500 text-lg leading-none px-1" onclick="this.parentElement.parentElement.remove()">&times;</button>' +
+                '</div></div>';
+            c.innerHTML = html;
+        }
+    }
+    function resizePhoto(input) {
+        var f = input.files[0]; if (!f) return;
+        var r = new FileReader();
+        r.onload = function (e) {
+            var img = new Image();
+            img.onload = function () {
+                var max = 400, w = img.width, h = img.height;
+                if (w > max || h > max) { if (w > h) { h = h * max / w; w = max; } else { w = w * max / h; h = max; } }
+                var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+                cv.getContext('2d').drawImage(img, 0, 0, w, h);
+                var b64 = cv.toDataURL('image/jpeg', 0.85).split(',')[1];
+                document.getElementById('photo_b64').value = b64;
+                document.getElementById('photo_type').value = 'image/jpeg';
+                var pv = document.getElementById('photo-preview');
+                if (pv.tagName === 'IMG') { pv.src = 'data:image/jpeg;base64,' + b64; }
+                else {
+                    var im = document.createElement('img'); im.id = 'photo-preview';
+                    im.className = 'w-full h-auto rounded mb-2'; im.src = 'data:image/jpeg;base64,' + b64;
+                    pv.parentNode.replaceChild(im, pv);
+                }
+            };
+            img.src = e.target.result;
+        };
+        r.readAsDataURL(f);
+    }
+</script>
+}
+
+templ ContactEdit(vc *vcard.VCard, contactID string, etag string, bookID string, bookName string, errorMsg string) {
+<div class="max-w-2xl">
+    <a href={ "/address-books/" + bookID + "/contacts" }
+        class="text-sm text-muted-foreground hover:text-foreground">&larr; Back to { bookName }</a>
+    <h2 class="text-2xl font-bold tracking-tight mt-2 mb-1">{ vc.DisplayName }</h2>
+    <p class="text-sm text-muted-foreground mb-4">ETag: { etag }</p>
+    @ContactForm(vc, "/address-books/"+bookID+"/contacts/"+contactID, errorMsg)
+</div>
+}
+
+templ ContactNew(bookID string, bookName string, errorMsg string) {
+<div class="max-w-2xl">
+    <a href={ "/address-books/" + bookID + "/contacts" }
+        class="text-sm text-muted-foreground hover:text-foreground">&larr; Back to { bookName }</a>
+    <h2 class="text-2xl font-bold tracking-tight mt-2 mb-6">New Contact</h2>
+    @ContactForm(vcard.NewVCard(""), "/address-books/"+bookID+"/contacts", errorMsg)
+</div>
+}
+
+templ ContactFormFields(bookID string, errorMsg string) {
+@ContactForm(vcard.NewVCard(""), "/address-books/"+bookID+"/contacts", errorMsg)
+}

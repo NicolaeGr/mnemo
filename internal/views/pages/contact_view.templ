@@ -1,0 +1,94 @@
+package pages
+
+import "mnemo/internal/vcard"
+
+templ ContactView(vc *vcard.VCard, contactID string, etag string, bookID string, bookName string) {
+<div class="max-w-xl">
+    <a href={ "/address-books/" + bookID + "/contacts" }
+        class="text-sm text-muted-foreground hover:text-foreground">&larr; Back to { bookName }</a>
+    <h2 class="text-2xl font-bold tracking-tight mt-2 mb-4">{ vc.DisplayName }</h2>
+
+    <div class="flex gap-6">
+        <div class="w-32 shrink-0">
+            if vc.Photo != "" {
+            <img src={ vc.Photo } class="w-full aspect-square rounded-lg object-cover border border-border"
+                alt="Photo" />
+            } else {
+            <div class="w-full aspect-square rounded-lg border border-border flex items-center justify-center" style={
+                avatarStyle(vc.DisplayName) }>
+                <span class="text-2xl font-bold text-white">{ initial(vc.DisplayName) }</span>
+            </div>
+            }
+        </div>
+
+        <div class="flex-1 space-y-3 text-sm">
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <span class="text-muted-foreground">First Name</span>
+                    <p class="font-medium">{ vcard.ParseFirstName(vc.Name) }</p>
+                </div>
+                <div>
+                    <span class="text-muted-foreground">Last Name</span>
+                    <p class="font-medium">{ vcard.ParseLastName(vc.Name) }</p>
+                </div>
+            </div>
+            if vcard.ParseMiddleName(vc.Name) != "" {
+            <div>
+                <span class="text-muted-foreground">Middle Name</span>
+                <p class="font-medium">{ vcard.ParseMiddleName(vc.Name) }</p>
+            </div>
+            }
+            if vcard.ParsePrefix(vc.Name) != "" {
+            <div>
+                <span class="text-muted-foreground">Prefix</span>
+                <p class="font-medium">{ vcard.ParsePrefix(vc.Name) }</p>
+            </div>
+            } if vcard.ParseSuffix(vc.Name) != "" {
+            <div>
+                <span class="text-muted-foreground">Suffix</span>
+                <p class="font-medium">{ vcard.ParseSuffix(vc.Name) }</p>
+            </div>
+            } @ContactViewFields(vc)
+        </div>
+    </div>
+</div>
+}
+
+templ ContactViewFields(vc *vcard.VCard) {
+if vc.Org != "" {
+<div>
+    <span class="text-muted-foreground">Organization</span>
+    <p class="font-medium">{ vc.Org }</p>
+</div>
+}
+if vc.Title != "" {
+<div>
+    <span class="text-muted-foreground">Job Title</span>
+    <p class="font-medium">{ vc.Title }</p>
+</div>
+}
+for _, p := range vc.Phones {
+<div>
+    <span class="text-muted-foreground">Phone ({ p.Type })</span>
+    <p class="font-medium">{ p.Value }</p>
+</div>
+}
+for _, e := range vc.Emails {
+<div>
+    <span class="text-muted-foreground">Email</span>
+    <p class="font-medium">{ e.Value }</p>
+</div>
+}
+for _, x := range vc.Extra {
+<div>
+    <span class="text-muted-foreground">{ x.Name }</span>
+    <p class="font-medium">{ x.Value }</p>
+</div>
+}
+if vc.Note != "" {
+<div>
+    <span class="text-muted-foreground">Notes</span>
+    <p class="font-medium whitespace-pre-wrap">{ vc.Note }</p>
+</div>
+}
+}

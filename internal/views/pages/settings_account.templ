@@ -1,0 +1,26 @@
+package pages
+
+templ SettingsAccount(username string) {
+<div class="max-w-lg">
+    <h2 class="text-2xl font-bold tracking-tight mb-1">Account</h2>
+    <p class="text-sm text-muted-foreground mb-6">Your profile information.</p>
+
+    <div class="border border-border rounded-lg divide-y divide-border">
+        <div class="p-4 flex items-center justify-between">
+            <div>
+                <p class="text-sm font-medium">Username</p>
+                <p class="text-sm text-muted-foreground">{ username }</p>
+            </div>
+        </div>
+        <div class="p-4 flex items-center justify-between">
+            <div>
+                <p class="text-sm font-medium">Password</p>
+                <p class="text-sm text-muted-foreground">Change your password</p>
+            </div>
+            <button
+                class="py-1.5 px-3 border border-border rounded text-sm hover:bg-muted transition-colors disabled:opacity-50"
+                disabled>Coming soon</button>
+        </div>
+    </div>
+</div>
+}

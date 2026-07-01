@@ -1,0 +1,47 @@
+package pages
+
+
+
+// SettingsPage wraps content in a settings sub-layout with sidebar nav.
+// Used both in full-page SettingsLayout and inside modals.
+templ SettingsPage(active string, modal bool, content templ.Component) {
+<div class="flex flex-col md:flex-row gap-6">
+    <nav class="md:w-44 shrink-0 flex md:flex-col gap-1 text-sm">
+        if active == "account" {
+        if modal {
+        <a href="/settings/account" hx-get="/settings/account" hx-target="#modal-container"
+            class="p-2 rounded-sm transition-colors bg-primary/10 text-primary font-medium">Account</a>
+        } else {
+        <a href="/settings/account"
+            class="p-2 rounded-sm transition-colors bg-primary/10 text-primary font-medium">Account</a>
+        }
+        } else {
+        if modal {
+        <a href="/settings/account" hx-get="/settings/account" hx-target="#modal-container"
+            class="p-2 rounded-sm transition-colors hover:bg-muted">Account</a>
+        } else {
+        <a href="/settings/account" class="p-2 rounded-sm transition-colors hover:bg-muted">Account</a>
+        }
+        }
+        if active == "keys" {
+        if modal {
+        <a href="/settings/keys" hx-get="/settings/keys" hx-target="#modal-container"
+            class="p-2 rounded-sm transition-colors bg-primary/10 text-primary font-medium">Device Keys</a>
+        } else {
+        <a href="/settings/keys" class="p-2 rounded-sm transition-colors bg-primary/10 text-primary font-medium">Device
+            Keys</a>
+        }
+        } else {
+        if modal {
+        <a href="/settings/keys" hx-get="/settings/keys" hx-target="#modal-container"
+            class="p-2 rounded-sm transition-colors hover:bg-muted">Device Keys</a>
+        } else {
+        <a href="/settings/keys" class="p-2 rounded-sm transition-colors hover:bg-muted">Device Keys</a>
+        }
+        }
+    </nav>
+    <div class="flex-1 min-w-0">
+        @content
+    </div>
+</div>
+}

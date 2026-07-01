@@ -1,0 +1,76 @@
+package pages
+
+import "mnemo/internal/models"
+
+templ ContactsList(contacts []*models.Contact, bookID string, bookName string) {
+<div class="flex flex-col gap-4">
+    <div class="flex items-center justify-between">
+        <div>
+            <h2 class="text-2xl font-bold tracking-tight">{ bookName }</h2>
+            <p class="text-sm text-muted-foreground">{ len(contacts) } contact(s)</p>
+        </div>
+        <div class="flex gap-2">
+            <a href={ "/address-books/" + bookID + "/export" }
+                class="py-2 px-4 border border-border rounded text-sm hover:bg-muted transition-colors">Export</a>
+            <button hx-get={ "/address-books/" + bookID + "/contacts/new" } hx-target="#modal-container"
+                class="py-2 px-4 bg-primary text-primary-foreground text-sm font-medium rounded hover:bg-amber-600 transition-colors">+
+                New Contact</button>
+        </div>
+    </div>
+    <div class="flex items-center gap-3 text-sm">
+        <a href="/address-books" class="text-muted-foreground hover:text-foreground">&larr; Back to address
+            books</a>
+        <span class="text-muted-foreground">|</span>
+        <button hx-get={ "/address-books/" + bookID + "/import" } hx-target="#modal-container"
+            class="text-muted-foreground hover:text-foreground">Import VCF</button>
+    </div>
+    if len(contacts) == 0 {
+    <p class="text-muted-foreground mt-4">No contacts in this book yet.</p>
+    } else {
+    <div class="border border-border rounded-lg overflow-hidden mt-2">
+        <table class="w-full text-sm">
+            <thead class="bg-muted/50">
+                <tr>
+                    <th class="text-left p-3 font-medium text-muted-foreground">Photo</th>
+                    <th class="text-left p-3 font-medium text-muted-foreground">Name</th>
+                    <th class="text-left p-3 font-medium text-muted-foreground">Phone</th>
+                    <th class="text-left p-3 font-medium text-muted-foreground">Last Modified</th>
+                    <th class="text-right p-3 font-medium text-muted-foreground">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-border">
+                for _, c := range contacts {
+                <tr>
+                    <td class="p-2">
+                        if c.PhotoURL != "" {
+                        <img src={ c.PhotoURL } class="w-8 h-8 rounded-full object-cover" alt="photo" />
+                        } else {
+                        <span
+                            class="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs text-muted-foreground">?</span>
+                        }
+                    </td>
+                    <td class="p-3 font-medium">{ c.DisplayName }</td>
+                    <td class="p-3 text-muted-foreground text-sm">
+                        if c.FirstPhone != "" {
+                        { c.FirstPhone }
+                        }
+                    </td>
+                    <td class="p-3 text-muted-foreground">{ c.LastModified.Format("Jan 2, 2006 15:04") }</td>
+                    <td class="p-3 text-right">
+                        <button hx-get={ "/address-books/" + bookID + "/contacts/" + c.ID } hx-target="#modal-container"
+                            class="text-sm text-primary hover:underline">View</button>
+                        <button hx-get={ "/address-books/" + bookID + "/contacts/" + c.ID + "/edit" }
+                            hx-target="#modal-container"
+                            class="text-sm text-muted-foreground hover:text-foreground underline ml-3">Edit</button>
+                        <button hx-delete={ "/address-books/" + bookID + "/contacts/" + c.ID } hx-target="closest tr"
+                            hx-swap="outerHTML" hx-confirm="Delete this contact?"
+                            class="text-sm text-red-600 hover:underline ml-3">Delete</button>
+                    </td>
+                </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    }
+</div>
+}

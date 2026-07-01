@@ -1,0 +1,38 @@
+package pages
+
+templ UserForm(errorMsg string) {
+@Modal("New User", ModalOpts{ShowClose: true, SizeClass: "max-w-md"}) {
+<form method="POST" action="/users" class="flex flex-col gap-4">
+    if errorMsg != "" {
+    <div class="mb-4 p-3 rounded bg-red-50 border border-red-200 text-red-700 text-sm" role="alert">{ errorMsg }</div>
+    }
+    <div>
+        <label for="username" class="block text-sm font-medium mb-1">Username</label>
+        <input type="text" id="username" name="username" required autocomplete="off"
+            class="w-full px-3 py-2 border border-border rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+            placeholder="username" />
+    </div>
+    <div>
+        <label for="password" class="block text-sm font-medium mb-1">Password</label>
+        <input type="password" id="password" name="password" required minlength="8" autocomplete="off"
+            class="w-full px-3 py-2 border border-border rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+            placeholder="at least 8 characters" />
+    </div>
+    <div>
+        <label for="role" class="block text-sm font-medium mb-1">Role</label>
+        <select id="role" name="role"
+            class="w-full px-3 py-2 border border-border rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary">
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+        </select>
+    </div>
+    <div class="flex gap-3 justify-end pt-2">
+        <button type="button" class="py-2 px-4 border border-border rounded text-sm hover:bg-muted transition-colors"
+            onclick="window.__closeModal()">Cancel</button>
+        <button type="submit"
+            class="py-2 px-4 bg-primary text-primary-foreground text-sm font-medium rounded hover:bg-amber-600 transition-colors">Create
+            User</button>
+    </div>
+</form>
+}
+}

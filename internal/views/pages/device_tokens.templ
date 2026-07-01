@@ -1,0 +1,71 @@
+package pages
+
+import "mnemo/internal/models"
+
+templ DeviceKeysPage(keys []*models.DeviceToken, newKey string, errorMsg string) {
+<div class="flex flex-col gap-4">
+    <div class="flex items-center justify-between">
+        <h2 class="text-2xl font-bold tracking-tight">Device Keys</h2>
+    </div>
+    <p class="text-muted-foreground text-sm">Device keys let your phone, tablet, or email client connect to your address
+        books. Each key is shown only once after creation.</p>
+
+    if newKey != "" {
+    <div class="p-4 rounded bg-amber-50 border border-amber-200">
+        <p class="text-sm font-medium text-amber-800">Your new device key</p>
+        <p class="mt-1 text-xs text-amber-700">Copy it now — it will not be shown again.</p>
+        <code
+            class="mt-2 block p-3 rounded bg-amber-100 text-amber-900 text-sm font-mono break-all select-all">{ newKey }</code>
+    </div>
+    }
+
+    if errorMsg != "" {
+    <div class="mb-4 p-3 rounded bg-red-50 border border-red-200 text-red-700 text-sm" role="alert">{ errorMsg }</div>
+    }
+
+    <form method="POST" action="/settings/keys" hx-target="#modal-container" class="flex gap-3 items-end">
+        <div class="flex-1">
+            <label for="device_name" class="block text-sm font-medium mb-1">New Device Key</label>
+            <input type="text" id="device_name" name="device_name" required placeholder="e.g. iPhone, Thunderbird"
+                class="w-full px-3 py-2 border border-border rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+        </div>
+        <button type="submit"
+            class="py-2 px-4 bg-primary text-primary-foreground text-sm font-medium rounded hover:bg-amber-600 transition-colors whitespace-nowrap">Generate
+            Key</button>
+    </form>
+
+    <div class="border border-border rounded-lg overflow-hidden mt-4">
+        <table class="w-full text-sm">
+            <thead class="bg-muted/50">
+                <tr>
+                    <th class="text-left p-3 font-medium text-muted-foreground">Device</th>
+                    <th class="text-left p-3 font-medium text-muted-foreground">Created</th>
+                    <th class="text-left p-3 font-medium text-muted-foreground">Last Used</th>
+                    <th class="text-right p-3 font-medium text-muted-foreground">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-border">
+                for _, k := range keys {
+                <tr>
+                    <td class="p-3 font-medium">{ k.DeviceName }</td>
+                    <td class="p-3 text-muted-foreground">{ k.CreatedAt.Format("Jan 2, 2006") }</td>
+                    <td class="p-3 text-muted-foreground">
+                        if k.LastUsedAt != nil {
+                        { k.LastUsedAt.Format("Jan 2, 2006 15:04") }
+                        } else {
+                        <span class="italic">Never</span>
+                        }
+                    </td>
+                    <td class="p-3 text-right">
+                        <form method="POST" action={ "/settings/keys/" + k.ID + "/delete" } hx-target="#modal-container"
+                            class="inline" onsubmit="return confirm('Revoke this token?');">
+                            <button type="submit" class="text-sm text-red-600 hover:underline">Revoke</button>
+                        </form>
+                    </td>
+                </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+}

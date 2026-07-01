@@ -1,0 +1,44 @@
+package pages
+
+type ModalOpts struct {
+ShowClose bool
+ShowExpand bool
+ExpandURL string
+SizeClass string
+AspectRatio string
+MaxHeight string
+}
+
+templ Modal(title string, opts ModalOpts) {
+<div id="modal-backdrop" class="fixed inset-0 z-40 bg-black/50 transition-opacity duration-200"
+    onclick="window.__closeModal()">
+</div>
+<div id="modal-dialog" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class={ modalDialogClass(opts.SizeClass, opts.MaxHeight, opts.AspectRatio) } onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between px-6 pt-6 pb-2 shrink-0">
+            <h2 class="text-xl font-bold">{ title }</h2>
+            <div class="flex items-center gap-1">
+                if opts.ShowExpand && opts.ExpandURL != "" {
+                <a href={ opts.ExpandURL } hx-boost="false"
+                    class="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-muted"
+                    title="Open as full page" onclick="window.__closeModal()">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4">
+                        </path>
+                    </svg>
+                </a>
+                }
+                if opts.ShowClose {
+                <button type="button"
+                    class="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-muted text-lg leading-none"
+                    onclick="window.__closeModal()">&times;</button>
+                }
+            </div>
+        </div>
+        <div class="px-6 pb-6 overflow-y-auto">
+            { children... }
+        </div>
+    </div>
+</div>
+}

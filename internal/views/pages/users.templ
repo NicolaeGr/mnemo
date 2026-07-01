@@ -1,0 +1,79 @@
+package pages
+
+import "mnemo/internal/models"
+
+templ UsersList(users []*models.User, showAdmin bool) {
+<div class="flex flex-col gap-4">
+    <div class="flex items-center justify-between">
+        <h2 class="text-2xl font-bold tracking-tight">Users</h2>
+        if showAdmin {
+        <button hx-get="/users/new" hx-target="#modal-container"
+            class="py-2 px-4 bg-primary text-primary-foreground text-sm font-medium rounded hover:bg-amber-600 transition-colors">
+            + New User
+        </button>
+        }
+    </div>
+
+    <div class="border border-border rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead class="bg-muted/50">
+                <tr>
+                    <th class="text-left p-3 font-medium text-muted-foreground">Username</th>
+                    <th class="text-left p-3 font-medium text-muted-foreground">Role</th>
+                    if showAdmin {
+                    <th class="text-left p-3 font-medium text-muted-foreground">Status</th>
+                    }
+                    <th class="text-left p-3 font-medium text-muted-foreground">Created</th>
+                    if showAdmin {
+                    <th class="text-right p-3 font-medium text-muted-foreground">Actions</th>
+                    }
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-border">
+                for _, u := range users {
+                <tr>
+                    <td class="p-3 font-medium">{ u.Username }</td>
+                    <td class="p-3">
+                        if u.Role == "admin" {
+                        <span
+                            class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">{
+                            u.Role }</span>
+                        } else {
+                        <span
+                            class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{
+                            u.Role }</span>
+                        }
+                    </td>
+                    if showAdmin {
+                    <td class="p-3">
+                        if u.IsActive {
+                        <span class="inline-flex items-center gap-1"><span
+                                class="w-2 h-2 rounded-full bg-green-500"></span> Active</span>
+                        } else {
+                        <span class="inline-flex items-center gap-1"><span
+                                class="w-2 h-2 rounded-full bg-red-500"></span> Inactive</span>
+                        }
+                    </td>
+                    }
+                    <td class="p-3 text-muted-foreground">{ u.CreatedAt.Format("Jan 2, 2006") }</td>
+                    if showAdmin {
+                    <td class="p-3 text-right">
+                        if u.IsActive {
+                        <button hx-patch={ "/users/" + u.ID + "/toggle-active" } hx-target="closest tr"
+                            hx-swap="outerHTML" class="text-sm text-primary hover:underline">Deactivate</button>
+                        } else {
+                        <button hx-patch={ "/users/" + u.ID + "/toggle-active" } hx-target="closest tr"
+                            hx-swap="outerHTML" class="text-sm text-primary hover:underline">Activate</button>
+                        }
+                    </td>
+                    }
+                </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Modal container for HTMX-driven modals -->
+    <div id="modal-container"></div>
+</div>
+}
