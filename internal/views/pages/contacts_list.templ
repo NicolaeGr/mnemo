@@ -42,12 +42,8 @@ templ ContactsList(contacts []*models.Contact, bookID string, bookName string) {
                 for _, c := range contacts {
                 <tr>
                     <td class="p-2">
-                        if c.PhotoURL != "" {
-                        <img src={ c.PhotoURL } class="w-8 h-8 rounded-full object-cover" alt="photo" />
-                        } else {
-                        <span
-                            class="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs text-muted-foreground">?</span>
-                        }
+                        <img src={ "/address-books/" + c.AddressBookID + "/contacts/" + c.ID + "/photo" }
+                            class="w-8 h-8 rounded-full object-cover" alt="photo" loading="lazy" />
                     </td>
                     <td class="p-3 font-medium">{ c.DisplayName }</td>
                     <td class="p-3 text-muted-foreground text-sm">

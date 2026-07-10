@@ -14,6 +14,7 @@ templ Modal(title string, opts ModalOpts) {
     onclick="window.__closeModal()">
 </div>
 <div id="modal-dialog" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+
     <div class={ modalDialogClass(opts.SizeClass, opts.MaxHeight, opts.AspectRatio) } onclick="event.stopPropagation()">
         <div class="flex items-center justify-between px-6 pt-6 pb-2 shrink-0">
             <h2 class="text-xl font-bold">{ title }</h2>

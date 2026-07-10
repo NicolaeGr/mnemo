@@ -6,7 +6,8 @@ if errorMsg != "" {
 <div class="mb-4 p-3 rounded bg-red-50 border border-red-200 text-red-700 text-sm" role="alert">{ errorMsg }</div>
 }
 <form method="POST" action={ "/address-books/" + bookID + "/import" } enctype="multipart/form-data"
-    class="flex flex-col gap-4" hx-encoding="multipart/form-data" hx-target="#modal-container" hx-swap="innerHTML">
+    class="flex flex-col gap-4" hx-encoding="multipart/form-data" hx-target="#modal-container" hx-swap="innerHTML"
+    hx-push-url="false">
     <div>
         <label for="vcf_file" class="block text-sm font-medium mb-1">VCF File</label>
         <input type="file" id="vcf_file" name="vcf_file" accept=".vcf,.vcard" required class="w-full text-sm" />
@@ -40,9 +41,7 @@ if errorMsg != "" {
             onclick="window.__closeModal()">Cancel</button>
         <button type="submit"
             class="py-2 px-4 bg-primary text-primary-foreground text-sm font-medium rounded hover:bg-amber-600 transition-colors"
-            class="py-2 px-4 bg-primary text-primary-foreground text-sm font-medium rounded hover:bg-amber-600 transition-colors"
-            onclick="this.classList.add('opacity-50');this.textContent='Importing...';"
-            hx-disable="true">Import</button>
+            onclick="this.classList.add('opacity-50');this.textContent='Importing...';">Import</button>
     </div>
 </form>
 <script>

@@ -31,6 +31,12 @@ func slugify(name string) string {
 	return s
 }
 
+func (s *AddressBookService) CountAll(ctx context.Context) (int, error) {
+	var count int
+	err := s.store.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM address_books").Scan(&count)
+	return count, err
+}
+
 func (s *AddressBookService) ListForUser(ctx context.Context, userID string) ([]*models.AddressBook, error) {
 	rows, err := s.store.DB.QueryContext(ctx,
 		`SELECT id, owner_id, slug, display_name FROM address_books

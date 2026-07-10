@@ -52,12 +52,12 @@ if sel == "INTERNET" {
 }
 }
 
-templ ContactForm(vc *vcard.VCard, action string, errorMsg string) {
+templ ContactForm(vc *vcard.VCard, action string, errorMsg string, photoURL string) {
 if errorMsg != "" {
 <div class="mb-4 p-3 rounded bg-red-50 border border-red-200 text-red-700 text-sm" role="alert">{ errorMsg }</div>
 }
 
-<form method="POST" action={ action } class="flex flex-col gap-4">
+<form method="POST" action={ action } class="flex flex-col gap-4" onsubmit="return onSubmitForm(this)">
     <div class="flex gap-4">
         <div class="flex-1 space-y-4">
             <div class="flex gap-2">
@@ -91,28 +91,22 @@ if errorMsg != "" {
             </div>
             <div>
                 <label for="display_name" class="block text-sm font-medium mb-1">Display Name</label>
-                <input type="text" id="display_name" name="display_name" value={ vcard.ComposeDisplayName(vc.Name, "" )
-                    } class="w-full px-3 py-2 border border-border rounded text-sm bg-muted/30" placeholder="John Doe"
+                <input type="text" id="display_name" value={ vcard.ComposeDisplayName(vc.Name, "" ) }
+                    class="w-full px-3 py-2 border border-border rounded text-sm bg-muted/30" placeholder="John Doe"
                     readonly />
             </div>
         </div>
 
+        if photoURL != "" {
         <div class="w-40 shrink-0">
             <label class="block text-sm font-medium mb-1">Photo</label>
             <div class="border border-border rounded-lg p-2 text-center">
-                if vc.Photo != "" {
-                <img src={ vcard.PhotoURL(vc) } class="w-full h-auto rounded mb-2" alt="Photo" id="photo-preview" />
-                } else {
-                <div id="photo-preview"
-                    class="w-full aspect-square bg-muted rounded mb-2 flex items-center justify-center text-muted-foreground text-xs">
-                    No photo</div>
-                }
-                <input type="file" accept="image/*" id="photo-input" class="text-xs w-full"
-                    onchange="resizePhoto(this)" />
-                <input type="hidden" name="photo_b64" id="photo_b64" value={ vc.Photo } />
-                <input type="hidden" name="photo_type" id="photo_type" value={ vc.PhotoType } />
+                <img src={ photoURL } class="w-full h-auto rounded mb-2 object-cover" alt="Photo" id="photo-preview" />
+                <input type="file" accept="image/*" id="photo-input" class="text-xs w-full" data-upload-url={ photoURL }
+                    onchange="uploadPhoto(this)" />
             </div>
         </div>
+        }
     </div>
 
     <fieldset>
@@ -260,30 +254,52 @@ if errorMsg != "" {
             c.innerHTML = html;
         }
     }
-    function resizePhoto(input) {
+    var _photoPromise = null;
+
+    function uploadPhoto(input) {
+        var url = input.getAttribute('data-upload-url');
         var f = input.files[0]; if (!f) return;
-        var r = new FileReader();
-        r.onload = function (e) {
-            var img = new Image();
-            img.onload = function () {
-                var max = 400, w = img.width, h = img.height;
-                if (w > max || h > max) { if (w > h) { h = h * max / w; w = max; } else { w = w * max / h; h = max; } }
-                var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-                cv.getContext('2d').drawImage(img, 0, 0, w, h);
-                var b64 = cv.toDataURL('image/jpeg', 0.85).split(',')[1];
-                document.getElementById('photo_b64').value = b64;
-                document.getElementById('photo_type').value = 'image/jpeg';
-                var pv = document.getElementById('photo-preview');
-                if (pv.tagName === 'IMG') { pv.src = 'data:image/jpeg;base64,' + b64; }
-                else {
-                    var im = document.createElement('img'); im.id = 'photo-preview';
-                    im.className = 'w-full h-auto rounded mb-2'; im.src = 'data:image/jpeg;base64,' + b64;
-                    pv.parentNode.replaceChild(im, pv);
-                }
+        _photoPromise = new Promise(function (resolve) {
+            var r = new FileReader();
+            r.onload = function (e) {
+                var img = new Image();
+                img.onload = function () {
+                    var max = 400, w = img.width, h = img.height;
+                    if (w > max || h > max) { if (w > h) { h = h * max / w; w = max; } else { w = w * max / h; h = max; } }
+                    var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+                    cv.getContext('2d').drawImage(img, 0, 0, w, h);
+                    var b64 = cv.toDataURL('image/jpeg', 0.85).split(',')[1];
+
+                    var fd = new FormData();
+                    fd.append('photo_b64', b64);
+                    fd.append('photo_type', 'image/jpeg');
+                    fetch(url, { method: 'POST', body: fd }).then(function (resp) {
+                        if (resp.ok) {
+                            var pv = document.getElementById('photo-preview');
+                            pv.src = url + '?t=' + Date.now();
+                        }
+                        resolve(resp.ok);
+                    }).catch(function () { resolve(false); });
+                };
+                img.src = e.target.result;
             };
-            img.src = e.target.result;
-        };
-        r.readAsDataURL(f);
+            r.readAsDataURL(f);
+        });
+    }
+    function onSubmitForm(form) {
+        var btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+
+        if (_photoPromise) {
+            // Wait for pending photo upload, then submit form
+            _photoPromise.then(function () {
+                _photoPromise = null;
+                form.submit();
+            });
+            return false;
+        }
+        return true;
     }
 </script>
 }
@@ -294,7 +310,8 @@ templ ContactEdit(vc *vcard.VCard, contactID string, etag string, bookID string,
         class="text-sm text-muted-foreground hover:text-foreground">&larr; Back to { bookName }</a>
     <h2 class="text-2xl font-bold tracking-tight mt-2 mb-1">{ vc.DisplayName }</h2>
     <p class="text-sm text-muted-foreground mb-4">ETag: { etag }</p>
-    @ContactForm(vc, "/address-books/"+bookID+"/contacts/"+contactID, errorMsg)
+    @ContactForm(vc, "/address-books/"+bookID+"/contacts/"+contactID, errorMsg,
+    "/address-books/"+bookID+"/contacts/"+contactID+"/photo")
 </div>
 }
 
@@ -303,10 +320,10 @@ templ ContactNew(bookID string, bookName string, errorMsg string) {
     <a href={ "/address-books/" + bookID + "/contacts" }
         class="text-sm text-muted-foreground hover:text-foreground">&larr; Back to { bookName }</a>
     <h2 class="text-2xl font-bold tracking-tight mt-2 mb-6">New Contact</h2>
-    @ContactForm(vcard.NewVCard(""), "/address-books/"+bookID+"/contacts", errorMsg)
+    @ContactForm(vcard.NewVCard(""), "/address-books/"+bookID+"/contacts", errorMsg, "")
 </div>
 }
 
 templ ContactFormFields(bookID string, errorMsg string) {
-@ContactForm(vcard.NewVCard(""), "/address-books/"+bookID+"/contacts", errorMsg)
+@ContactForm(vcard.NewVCard(""), "/address-books/"+bookID+"/contacts", errorMsg, "")
 }

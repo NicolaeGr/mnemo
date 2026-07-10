@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"mnemo/internal/auth"
+	"mnemo/internal/models"
 	"mnemo/internal/services"
 	"mnemo/internal/vcard"
 	"mnemo/internal/views/pages"
@@ -256,6 +257,12 @@ func (r *Router) handleContactUpdate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Preserve existing photo when form doesn't send one
+	if fd.PhotoB64 == "" && vc.Photo != "" {
+		fd.PhotoB64 = vc.Photo
+		fd.PhotoType = vc.PhotoType
+	}
+
 	vc = vcard.FromForm(fd)
 	vcardText := vc.String()
 	_, err = r.ContactService.UpdateContact(req.Context(), contactID, fd.DisplayName, vcardText)
@@ -264,6 +271,12 @@ func (r *Router) handleContactUpdate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// dlose modal and refresh
+	if req.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", "/address-books/"+bookID+"/contacts")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	http.Redirect(w, req, "/address-books/"+bookID+"/contacts", http.StatusSeeOther)
 }
 
@@ -272,6 +285,60 @@ func (r *Router) handleContactDelete(w http.ResponseWriter, req *http.Request) {
 
 	if err := r.ContactService.SoftDelete(req.Context(), contactID); err != nil {
 		http.Error(w, "Contact not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (r *Router) handleContactPhoto(w http.ResponseWriter, req *http.Request) {
+	contactID := chi.URLParam(req, "contactId")
+
+	data, mimeType, etag, _, err := r.ContactService.GetPhoto(req.Context(), contactID)
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Write(data)
+}
+
+func (r *Router) handleContactPhotoUpload(w http.ResponseWriter, req *http.Request) {
+	contactID := chi.URLParam(req, "contactId")
+
+	if err := req.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "Invalid upload", http.StatusBadRequest)
+		return
+	}
+
+	photoB64 := req.FormValue("photo_b64")
+	photoType := req.FormValue("photo_type")
+	if photoB64 == "" {
+		http.Error(w, "Missing photo data", http.StatusBadRequest)
+		return
+	}
+	if photoType == "" {
+		photoType = "image/jpeg"
+	}
+
+	contact, err := r.ContactService.GetByID(req.Context(), contactID)
+	if err != nil {
+		http.Error(w, "Contact not found", http.StatusNotFound)
+		return
+	}
+
+	vc := vcard.Parse(contact.VCardText)
+	vc.Photo = photoB64
+	vc.PhotoType = photoType
+	updatedVCard := vc.String()
+
+	_, err = r.ContactService.UpdateContact(req.Context(), contactID, contact.DisplayName, updatedVCard)
+	if err != nil {
+		http.Error(w, "Failed to update photo", http.StatusInternalServerError)
 		return
 	}
 
@@ -430,33 +497,38 @@ func (r *Router) handleContactsImport(w http.ResponseWriter, req *http.Request) 
 
 	imported := 0
 	skipped := 0
+
+	// Build dedup lookup once
+	var existingByName map[string]*models.Contact
+	if dedupMode != "none" {
+		existing, _ := r.ContactService.ListByBook(req.Context(), targetBookID)
+		existingByName = make(map[string]*models.Contact, len(existing))
+		for _, e := range existing {
+			existingByName[strings.ToLower(e.DisplayName)] = e
+		}
+	}
+
 	for _, entry := range entries {
 		if entry.displayName == "" {
 			continue
 		}
 
-		if dedupMode != "none" {
-			existing, _ := r.ContactService.ListByBook(req.Context(), targetBookID)
-			dup := false
-			for _, e := range existing {
-				// Simple name-based dedup
-				if strings.EqualFold(entry.displayName, e.DisplayName) {
-					switch dedupMode {
-					case "exact":
-						dup = entry.rawText == e.VCardText
-					case "name":
-						dup = true
-					case "name_phone":
-						dup = true
-					}
-					if dup {
-						break
-					}
+		if existingByName != nil {
+			if e, ok := existingByName[strings.ToLower(entry.displayName)]; ok {
+				dup := false
+				switch dedupMode {
+				case "exact":
+					dup = entry.rawText == e.VCardText
+				case "name":
+					dup = true
+				case "name_phone":
+					// TODO: compare phone numbers for smarter dedup
+					dup = true
 				}
-			}
-			if dup {
-				skipped++
-				continue
+				if dup {
+					skipped++
+					continue
+				}
 			}
 		}
 
@@ -498,12 +570,17 @@ func readContactForm(r *http.Request) *vcard.FormData {
 		Prefix:      r.FormValue("prefix"),
 		Suffix:      r.FormValue("suffix"),
 		DisplayName: r.FormValue("display_name"),
-		Org:         r.FormValue("org"),
-		Title:       r.FormValue("title"),
-		Note:        r.FormValue("note"),
-		PhotoB64:    r.FormValue("photo_b64"),
-		PhotoType:   r.FormValue("photo_type"),
 	}
+	// Recompute display name; ignore readonly field
+	if fd.FirstName != "" || fd.LastName != "" {
+		n := fd.LastName + ";" + fd.FirstName + ";" + fd.MiddleName + ";" + fd.Prefix + ";" + fd.Suffix
+		fd.DisplayName = vcard.ComposeDisplayName(n, "")
+	}
+	fd.Org = r.FormValue("org")
+	fd.Title = r.FormValue("title")
+	fd.Note = r.FormValue("note")
+	fd.PhotoB64 = r.FormValue("photo_b64")
+	fd.PhotoType = r.FormValue("photo_type")
 	fd.PhoneTypes = r.Form["phone_type[]"]
 	fd.PhoneVals = r.Form["phone_value[]"]
 	fd.EmailTypes = r.Form["email_type[]"]

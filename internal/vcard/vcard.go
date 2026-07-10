@@ -133,29 +133,36 @@ func Generate(v *VCard) string {
 }
 
 func splitLines(text string) []string {
+	runes := []rune(text)
 	var lines []string
-	current := ""
-	for i := 0; i < len(text); i++ {
-		c := text[i]
-		if c == '\n' || c == '\r' {
-			if current != "" {
-
-				if i+1 < len(text) && (text[i+1] == ' ' || text[i+1] == '\t') {
-					i++
-					continue
-				}
-				lines = append(lines, current)
-				current = ""
-			}
-			if c == '\r' && i+1 < len(text) && text[i+1] == '\n' {
+	current := make([]rune, 0)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if r == '\n' || r == '\r' {
+			// Check continuation (after \n or \r\n)
+			cont := false
+			if r == '\n' && i+1 < len(runes) && (runes[i+1] == ' ' || runes[i+1] == '\t') {
+				cont = true
+			} else if r == '\r' && i+1 < len(runes) && runes[i+1] == '\n' {
 				i++
+				if i+1 < len(runes) && (runes[i+1] == ' ' || runes[i+1] == '\t') {
+					cont = true
+				}
+			}
+			if cont {
+				i++
+				continue
+			}
+			if len(current) > 0 {
+				lines = append(lines, string(current))
+				current = make([]rune, 0)
 			}
 		} else {
-			current += string(c)
+			current = append(current, r)
 		}
 	}
-	if current != "" {
-		lines = append(lines, current)
+	if len(current) > 0 {
+		lines = append(lines, string(current))
 	}
 	return lines
 }
@@ -185,16 +192,16 @@ func splitLine(line string) (prop string, params []string, value string) {
 
 func splitSemicolons(s string) []string {
 	var parts []string
-	current := ""
-	for i := 0; i < len(s); i++ {
-		if s[i] == ';' {
-			parts = append(parts, current)
-			current = ""
+	current := make([]rune, 0)
+	for _, r := range s {
+		if r == ';' {
+			parts = append(parts, string(current))
+			current = make([]rune, 0)
 		} else {
-			current += string(s[i])
+			current = append(current, r)
 		}
 	}
-	parts = append(parts, current)
+	parts = append(parts, string(current))
 	return parts
 }
 
@@ -251,9 +258,10 @@ func escape(s string) string {
 
 func unescape(s string) string {
 	res := ""
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+1 < len(s) {
-			switch s[i+1] {
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		if runes[i] == '\\' && i+1 < len(runes) {
+			switch runes[i+1] {
 			case 'n', 'N':
 				res += "\n"
 			case ';':
@@ -263,11 +271,11 @@ func unescape(s string) string {
 			case '\\':
 				res += "\\"
 			default:
-				res += string(s[i+1])
+				res += string(runes[i+1])
 			}
 			i++
 		} else {
-			res += string(s[i])
+			res += string(runes[i])
 		}
 	}
 	return res

@@ -170,7 +170,6 @@ func (r *Router) handleDeviceKeysDelete(w http.ResponseWriter, req *http.Request
 }
 
 func (r *Router) handleInviteCreate(w http.ResponseWriter, req *http.Request) {
-
 	sess := auth.UserFromContext(req.Context())
 	if sess == nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)

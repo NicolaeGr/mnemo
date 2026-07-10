@@ -61,5 +61,4 @@ type Contact struct {
 	LastModified  time.Time  `json:"last_modified"`
 	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
 	FirstPhone    string     `json:"first_phone,omitempty"`
-	PhotoURL      string     `json:"photo_url,omitempty"`
 }

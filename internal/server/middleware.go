@@ -25,7 +25,8 @@ func HTMXMiddleware(next http.Handler) http.Handler {
 }
 
 func IsHTMX(r *http.Request) bool {
-	return r.Context().Value(IsHTMXKey).(bool)
+	val, _ := r.Context().Value(IsHTMXKey).(bool)
+	return val
 }
 
 func usernameFromContext(r *http.Request) string {

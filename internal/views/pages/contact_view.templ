@@ -10,15 +10,8 @@ templ ContactView(vc *vcard.VCard, contactID string, etag string, bookID string,
 
     <div class="flex gap-6">
         <div class="w-32 shrink-0">
-            if vc.Photo != "" {
-            <img src={ vc.Photo } class="w-full aspect-square rounded-lg object-cover border border-border"
-                alt="Photo" />
-            } else {
-            <div class="w-full aspect-square rounded-lg border border-border flex items-center justify-center" style={
-                avatarStyle(vc.DisplayName) }>
-                <span class="text-2xl font-bold text-white">{ initial(vc.DisplayName) }</span>
-            </div>
-            }
+            <img src={ "/address-books/" + bookID + "/contacts/" + contactID + "/photo" }
+                class="w-full aspect-square rounded-lg object-cover border border-border" alt="Photo" />
         </div>
 
         <div class="flex-1 space-y-3 text-sm">

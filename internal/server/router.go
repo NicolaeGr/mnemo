@@ -108,6 +108,8 @@ func (r *Router) registerRoutes() {
 		gr.Get("/address-books/{id}/export", r.handleContactsExport)
 		gr.Get("/address-books/{id}/import", r.handleContactsImportForm)
 		gr.Post("/address-books/{id}/import", r.handleContactsImport)
+		gr.Get("/address-books/{id}/contacts/{contactId}/photo", r.handleContactPhoto)
+		gr.Post("/address-books/{id}/contacts/{contactId}/photo", r.handleContactPhotoUpload)
 
 		// Admin only
 		gr.Group(func(admin chi.Router) {
@@ -125,5 +127,8 @@ func (r *Router) registerRoutes() {
 }
 
 func (r *Router) handleIndex(w http.ResponseWriter, req *http.Request) {
-	RenderPage(w, req, "Dashboard", pages.Dashboard())
+	userCount, _ := r.UserService.CountUsers(req.Context())
+	bookCount, _ := r.AddressBookService.CountAll(req.Context())
+	contactCount, _ := r.ContactService.CountAll(req.Context())
+	RenderPage(w, req, "Dashboard", pages.Dashboard(userCount, bookCount, contactCount))
 }
