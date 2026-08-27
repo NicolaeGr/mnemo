@@ -21,7 +21,7 @@
 }
 
 :root {
-  --radius: 0.5rem;
+  --radius: 0.375rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
@@ -30,8 +30,8 @@
   --muted-foreground: oklch(0.556 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.92 0 0);
-  --ring: oklch(0.145 0 0);
-  --accent: oklch(0.6 0.18 260);
+  --ring: oklch(0.69 0.16 60);
+  --accent: oklch(0.69 0.16 60);
   --accent-foreground: oklch(1 0 0);
   color-scheme: light;
 }
@@ -44,9 +44,9 @@
   --muted-foreground: oklch(0.708 0 0);
   --border: oklch(0.269 0 0);
   --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
-  --accent: oklch(0.6 0.18 260);
-  --accent-foreground: oklch(1 0 0);
+  --ring: oklch(0.72 0.14 60);
+  --accent: oklch(0.72 0.14 60);
+  --accent-foreground: oklch(0.145 0 0);
   color-scheme: dark;
 }
 
@@ -167,19 +167,19 @@ body[data-stack~="auth"] {
   background:
     radial-gradient(
       60% 60% at 50% 0%,
-      oklch(0.93 0.03 250 / 0.5) 0%,
+      oklch(0.95 0.05 70 / 0.55) 0%,
       transparent 70%
     ),
-    linear-gradient(180deg, oklch(0.97 0.02 250), var(--color-background));
+    linear-gradient(180deg, oklch(0.97 0.03 80), var(--color-background));
 }
 :root.dark .auth-bg {
   background:
     radial-gradient(
       60% 60% at 50% 0%,
-      oklch(0.3 0.06 250 / 0.4) 0%,
+      oklch(0.3 0.06 60 / 0.4) 0%,
       transparent 70%
     ),
-    linear-gradient(180deg, oklch(0.2 0.04 250), var(--color-background));
+    linear-gradient(180deg, oklch(0.2 0.04 70), var(--color-background));
 }
 
 .app-toast {
