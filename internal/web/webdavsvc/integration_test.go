@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"example.com/segments/internal/store"
+	"example.com/segments/internal/testdb"
 	"example.com/segments/internal/web/webdavsvc"
 )
 
@@ -254,9 +254,15 @@ func sha256Hex(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// testPool returns a pool to this package's isolated database, wiped to a
+// fresh schema so migration ordering/versions never leak state across runs.
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	pool, err := pgxpool.New(context.Background(), testDatabaseURL())
+	url, err := testdb.URL("webdavsvc")
+	if err != nil {
+		t.Fatalf("test db: %v", err)
+	}
+	pool, err := pgxpool.New(context.Background(), url)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -264,7 +270,6 @@ func testPool(t *testing.T) *pgxpool.Pool {
 		pool.Close()
 		t.Fatalf("ping: %v", err)
 	}
-	// Fresh schema every run so migration ordering/versions never leak state.
 	if _, err := pool.Exec(context.Background(), `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
 		pool.Close()
 		t.Fatalf("drop schema: %v", err)
@@ -274,24 +279,4 @@ func testPool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("migrate: %v", err)
 	}
 	return pool
-}
-
-// testDatabaseURL mirrors config.Load's DSN construction so tests run against
-// the same devenv-provided Postgres as the app.
-func testDatabaseURL() string {
-	if v := os.Getenv("DATABASE_URL"); v != "" {
-		return v
-	}
-	host := envOr("PGHOST", "/run/user/1000/devenv-386ec41/postgres")
-	port := envOr("PGPORT", "5432")
-	user := envOr("PGUSER", os.Getenv("USER"))
-	db := envOr("PGDATABASE", os.Getenv("USER"))
-	return "host=" + host + " port=" + port + " user=" + user + " dbname=" + db + " sslmode=disable"
-}
-
-func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
 }
