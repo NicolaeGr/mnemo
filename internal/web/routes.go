@@ -32,7 +32,7 @@ func New(d Deps) http.Handler {
 	r.Mount("/carddav", webdavsvc.New(store.NewUsers(d.Store.PG), d.Store.PG))
 	r.Mount("/api/v1", api.New(store.NewUsers(d.Store.PG), d.Store.PG))
 	r.Handle("/.well-known/carddav", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/carddav/", http.StatusFound)
+		http.Redirect(w, r, "/carddav/", http.StatusMovedPermanently)
 	}))
 
 	root := seg.Segment{

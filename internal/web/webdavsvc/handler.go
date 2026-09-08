@@ -23,15 +23,6 @@ func New(users *store.Users, pool *pgxpool.Pool) http.Handler {
 	mux := http.NewServeMux()
 	b := &backend{users: users, pool: pool}
 
-	mux.HandleFunc("/.well-known/carddav", func(w http.ResponseWriter, r *http.Request) {
-		actor, ok := auth.ActorFrom(r.Context())
-		if !ok {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		http.Redirect(w, r, principalPath(actor.Username), http.StatusFound)
-	})
-
 	// Root mount: answers PROPFIND / with current-user-principal.
 	mux.Handle("/", &carddav.Handler{Backend: b, Prefix: prefix})
 	// Principal + home-set + address-book + objects.
