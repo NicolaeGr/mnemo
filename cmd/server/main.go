@@ -9,12 +9,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nicolaegr/mnemo/internal/auth"
 	"github.com/nicolaegr/mnemo/internal/config"
 	"github.com/nicolaegr/mnemo/internal/jobs"
 	"github.com/nicolaegr/mnemo/internal/store"
 	"github.com/nicolaegr/mnemo/internal/web"
-	"github.com/nicolaegr/mnemo/internal/web/seg"
 )
 
 func main() {
@@ -44,19 +42,11 @@ func main() {
 		}
 	}
 
-	seg.DefaultCache = store.NewRedisCache(st.Redis)
 	go jobs.Run(ctx, st.PG)
-	sessions := auth.NewSessionManager(auth.SessionConfig{
-		Redis:    st.Redis,
-		Name:     cfg.SessionName,
-		TTL:      cfg.SessionTTL,
-		Secure:   cfg.CookieSecure,
-		SameSite: cfg.CookieSameSite,
-	})
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           web.New(web.Deps{Store: st, Sessions: sessions}),
+		Handler:           web.New(web.Deps{Store: st}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
