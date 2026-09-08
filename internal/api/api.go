@@ -28,8 +28,13 @@ func New(users *store.Users, pool *pgxpool.Pool) http.Handler {
 	a := &api{users: users, pool: pool}
 	r := chi.NewRouter()
 
-	r.Post("/principals", a.createPrincipal)
-	r.Get("/principals", a.listPrincipals)
+	r.Route("/principals", func(r chi.Router) {
+		r.Get("/", a.listPrincipals)
+		r.Post("/", a.createPrincipal)
+		r.Patch("/{id}", a.updatePrincipal)
+		r.Put("/{id}/overrides/{book}", a.setOverride)
+		r.Delete("/{id}/overrides/{book}", a.clearOverride)
+	})
 
 	r.Route("/books", func(r chi.Router) {
 		r.Get("/", a.listBooks)
@@ -272,6 +277,106 @@ func (a *api) listPrincipals(w http.ResponseWriter, r *http.Request) {
 		out = append(out, principalOut{p.ID, p.Tier, p.Label, ""})
 	}
 	writeJSON(w, 200, out, nil)
+}
+
+type principalPatch struct {
+	Tier *string `json:"tier"`
+}
+
+// updatePrincipal changes a principal's tier; the epoch bump makes clients
+// resync, which is how a tier flip takes effect on the wire.
+func (a *api) updatePrincipal(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(w, r)
+	if err != nil {
+		return
+	}
+	actor, err := a.actor(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var body principalPatch
+	if err := decodeJSON(r, &body); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if body.Tier == nil {
+		writeErr(w, model.ErrPrecondition)
+		return
+	}
+	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, actor.UserID); err != nil {
+			return err
+		}
+		return s.SetPrincipalTier(r.Context(), id, *body.Tier)
+	})
+	writeErr(w, err)
+}
+
+type overrideBody struct {
+	Enabled bool `json:"enabled"`
+}
+
+// setOverride upserts whether a principal may see a book.
+func (a *api) setOverride(w http.ResponseWriter, r *http.Request) {
+	pid, err := idParam(w, r)
+	if err != nil {
+		return
+	}
+	book, err := bookParam(w, r)
+	if err != nil {
+		return
+	}
+	actor, err := a.actor(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var body overrideBody
+	if err := decodeJSON(r, &body); err != nil {
+		writeErr(w, err)
+		return
+	}
+	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, actor.UserID); err != nil {
+			return err
+		}
+		return s.SetPrincipalOverride(r.Context(), pid, book, body.Enabled)
+	})
+	writeErr(w, err)
+}
+
+// clearOverride removes a principal's opt-out for a book.
+func (a *api) clearOverride(w http.ResponseWriter, r *http.Request) {
+	pid, err := idParam(w, r)
+	if err != nil {
+		return
+	}
+	book, err := bookParam(w, r)
+	if err != nil {
+		return
+	}
+	actor, err := a.actor(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, actor.UserID); err != nil {
+			return err
+		}
+		return s.ClearPrincipalOverride(r.Context(), pid, book)
+	})
+	writeErr(w, err)
+}
+
+func bookParam(w http.ResponseWriter, r *http.Request) (int64, error) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "book"), 10, 64)
+	if err != nil {
+		writeErr(w, model.ErrNotFound)
+		return 0, err
+	}
+	return id, nil
 }
 
 func (a *api) actor(r *http.Request) (auth.Actor, error) {

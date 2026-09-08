@@ -185,3 +185,70 @@ func (s ScopedStore) PrincipalInfo(ctx context.Context) (PrincipalInfo, error) {
 	}
 	return info, rows.Err()
 }
+
+// SetPrincipalOverride sets whether a principal may see a book. An override can
+// only subtract visibility, never grant it. Bumps that principal's epoch.
+// Caller holds LockSync.
+func (s ScopedStore) SetPrincipalOverride(ctx context.Context, principalID, bookID int64, enabled bool) error {
+	if err := s.requirePrincipal(ctx, principalID); err != nil {
+		return err
+	}
+	if err := s.requireOwnedBook(ctx, bookID); err != nil {
+		return err
+	}
+	if _, err := s.Tx.Exec(ctx, `
+		INSERT INTO principal_book_overrides (principal_id, book_id, enabled)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (principal_id, book_id) DO UPDATE SET enabled = $3`,
+		principalID, bookID, enabled); err != nil {
+		return err
+	}
+	return s.bumpPrincipals(ctx, []int64{principalID})
+}
+
+// ClearPrincipalOverride removes a principal's opt-out for a book. Bumps that
+// principal's epoch. Caller holds LockSync.
+func (s ScopedStore) ClearPrincipalOverride(ctx context.Context, principalID, bookID int64) error {
+	if err := s.requirePrincipal(ctx, principalID); err != nil {
+		return err
+	}
+	if err := s.requireOwnedBook(ctx, bookID); err != nil {
+		return err
+	}
+	if _, err := s.Tx.Exec(ctx, `
+		DELETE FROM principal_book_overrides WHERE principal_id = $1 AND book_id = $2`,
+		principalID, bookID); err != nil {
+		return err
+	}
+	return s.bumpPrincipals(ctx, []int64{principalID})
+}
+
+// SetPrincipalTier changes a principal's tier, which flips which books it can
+// see, so it bumps that principal's epoch. Caller holds LockSync.
+func (s ScopedStore) SetPrincipalTier(ctx context.Context, principalID int64, tier string) error {
+	if err := s.requirePrincipal(ctx, principalID); err != nil {
+		return err
+	}
+	if _, err := s.Tx.Exec(ctx, `
+		UPDATE principals SET tier = $3 WHERE id = $1 AND user_id = $2`,
+		principalID, s.Actor.UserID, tier); err != nil {
+		return err
+	}
+	return s.bumpPrincipals(ctx, []int64{principalID})
+}
+
+func (s ScopedStore) requirePrincipal(ctx context.Context, principalID int64) error {
+	var one int
+	err := s.Tx.QueryRow(ctx, `
+		SELECT 1 FROM principals WHERE id = $1 AND user_id = $2`,
+		principalID, s.Actor.UserID).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.ErrNotFound
+	}
+	return err
+}
+
+func (s ScopedStore) bumpPrincipals(ctx context.Context, ids []int64) error {
+	_, err := BumpPrincipalsEpoch(ctx, s.Tx, ids)
+	return err
+}
