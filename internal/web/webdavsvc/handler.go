@@ -37,5 +37,5 @@ func New(users *store.Users, pool *pgxpool.Pool) http.Handler {
 	// Principal + home-set + address-book + objects.
 	mux.Handle(prefix+"/", &carddav.Handler{Backend: b, Prefix: prefix})
 
-	return auth.RequireDAV(users, store.NewPrincipals(pool), mux)
+	return auth.RequireDAV(users, store.NewPrincipals(pool), &davFilter{next: mux, b: b})
 }

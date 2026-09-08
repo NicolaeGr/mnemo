@@ -75,6 +75,22 @@ func (p *PrincipalStore) Touch(ctx context.Context, id int64) error {
 	return err
 }
 
+// PrincipalEpoch returns the actor's sync_epoch, or 0 when the actor is a
+// password account (no principal, epoch ignored).
+func (s ScopedStore) PrincipalEpoch(ctx context.Context) (int64, error) {
+	if s.Actor.PrincipalID == nil {
+		return 0, nil
+	}
+	var epoch int64
+	err := s.Tx.QueryRow(ctx, `
+		SELECT sync_epoch FROM principals
+		 WHERE id = $1 AND user_id = $2`, *s.Actor.PrincipalID, s.Actor.UserID).Scan(&epoch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, model.ErrNotFound
+	}
+	return epoch, err
+}
+
 func (p *PrincipalStore) ListForUser(ctx context.Context, userID int64) ([]Principal, error) {
 	rows, err := p.pool.Query(ctx, `
 		SELECT id, user_id, tier, label, token_hash, sync_epoch, last_synced_at, created_at
