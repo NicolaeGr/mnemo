@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"path"
 	"strings"
 
@@ -150,11 +151,11 @@ func (b *backend) PutAddressObject(ctx context.Context, p string, card vcard.Car
 	})
 	switch {
 	case errors.Is(txErr, model.ErrPrecondition):
-		return nil, carddav.NewPreconditionError(carddav.PreconditionNoUIDConflict)
+		return nil, webdav.NewHTTPError(http.StatusPreconditionFailed, txErr)
 	case errors.Is(txErr, model.ErrNotFound):
 		return nil, b.notFound()
-	case errors.Is(txErr, model.ErrUIDConflict):
-		return nil, carddav.NewPreconditionError(carddav.PreconditionNoUIDConflict)
+	case errors.Is(txErr, model.ErrUIDConflict), errors.Is(txErr, model.ErrFilenameRetired):
+		return nil, webdav.NewHTTPError(http.StatusConflict, txErr)
 	case txErr != nil:
 		return nil, txErr
 	}
@@ -201,13 +202,12 @@ func putPrecondition(opts *carddav.PutAddressObjectOptions) (store.Precondition,
 		cond.IfNoneMatchAll = true
 	}
 	if opts.IfMatch.IsSet() {
-		if opts.IfMatch.IsWildcard() {
-			// If-Match: * — overwrite-if-exists with no etag gate; the store's
-			// nil IfMatch path already means "overwrite if exists, else insert".
-		} else if etag, err := opts.IfMatch.ETag(); err == nil {
-			cond.IfMatch = &etag
-		} else {
-			return cond, webdav.NewHTTPError(400, nil)
+		if !opts.IfMatch.IsWildcard() {
+			if etag, err := opts.IfMatch.ETag(); err == nil {
+				cond.IfMatch = &etag
+			} else {
+				return cond, webdav.NewHTTPError(http.StatusBadRequest, nil)
+			}
 		}
 	}
 	return cond, nil

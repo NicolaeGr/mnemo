@@ -166,6 +166,9 @@ func (s ScopedStore) updateContact(ctx context.Context, p PutContactParams, text
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PutResult{}, nil
 	}
+	if isLiveUIDConflict(err) {
+		return PutResult{}, mapUIDConflict(ctx, s, p.UID)
+	}
 	if err != nil {
 		return PutResult{}, err
 	}
