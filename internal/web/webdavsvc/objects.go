@@ -137,6 +137,8 @@ func (b *backend) PutAddressObject(ctx context.Context, p string, card vcard.Car
 		return nil, err
 	}
 
+	ensureFormattedName(card)
+
 	var buf bytes.Buffer
 	if err := vcard.NewEncoder(&buf).Encode(card); err != nil {
 		return nil, err
@@ -249,18 +251,57 @@ func normalizeVCards(s string) string {
 	return string(out)
 }
 
+// ensureFormattedName gives the card an FN when absent, derived from N, then the
+// email local part, then a placeholder. Cards without FN break clients and are
+// unsearchable by name.
+func ensureFormattedName(card vcard.Card) {
+	if card.Value(vcard.FieldFormattedName) != "" {
+		return
+	}
+	if n := card.Name(); n != nil {
+		name := strings.TrimSpace(n.GivenName + " " + n.FamilyName)
+		if name != "" {
+			card.SetValue(vcard.FieldFormattedName, name)
+			return
+		}
+	}
+	if email := card.Value(vcard.FieldEmail); email != "" {
+		if at := strings.IndexByte(email, '@'); at > 0 {
+			card.SetValue(vcard.FieldFormattedName, email[:at])
+			return
+		}
+	}
+	card.SetValue(vcard.FieldFormattedName, "(unnamed)")
+}
+
 func buildSearchMeta(card vcard.Card) map[string]any {
-	meta := make(map[string]any)
-	if fn := card.Value(vcard.FieldFormattedName); fn != "" {
-		meta["fn"] = fn
+	rawTels := card.Values(vcard.FieldTelephone)
+	tels := make([]map[string]string, 0, len(rawTels))
+	norm := make([]string, 0, len(rawTels))
+	for _, raw := range rawTels {
+		digits := normalizePhone(raw)
+		tels = append(tels, map[string]string{"raw": raw, "norm": digits})
+		if digits != "" {
+			norm = append(norm, digits)
+		}
 	}
-	if tels := card.Values(vcard.FieldTelephone); len(tels) > 0 {
-		meta["tel"] = tels
+	return map[string]any{
+		"fn":       card.Value(vcard.FieldFormattedName),
+		"emails":   card.Values(vcard.FieldEmail),
+		"org":      card.Value(vcard.FieldOrganization),
+		"tels":     tels,
+		"tel_norm": norm,
 	}
-	if emails := card.Values(vcard.FieldEmail); len(emails) > 0 {
-		meta["email"] = emails
+}
+
+func normalizePhone(raw string) string {
+	var b strings.Builder
+	for i := 0; i < len(raw); i++ {
+		if c := raw[i]; c >= '0' && c <= '9' {
+			b.WriteByte(c)
+		}
 	}
-	return meta
+	return b.String()
 }
 
 func visibleIDs(visible map[int64]bool) []int64 {
