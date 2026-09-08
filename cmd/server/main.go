@@ -31,11 +31,18 @@ func main() {
 	if err := store.Migrate(ctx, st.PG); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
-	if err := store.Seed(ctx, st.PG, cfg.BcryptCost); err != nil {
-		log.Fatalf("seed: %v", err)
+
+	users := store.NewUsers(st.PG)
+	var count int
+	if err := st.PG.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&count); err != nil {
+		log.Fatalf("count users: %v", err)
+	}
+	if count == 0 {
+		if _, _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "password", cfg.BcryptCost); err != nil {
+			log.Fatalf("bootstrap signup: %v", err)
+		}
 	}
 
-	// The segment cache moves to Redis (swapping the in-memory default).
 	seg.DefaultCache = store.NewRedisCache(st.Redis)
 	sessions := auth.NewSessionManager(auth.SessionConfig{
 		Redis:    st.Redis,
@@ -44,11 +51,10 @@ func main() {
 		Secure:   cfg.CookieSecure,
 		SameSite: cfg.CookieSameSite,
 	})
-	users := store.NewUsers(st.PG)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           web.New(web.Deps{Store: st, Sessions: sessions, Users: users}),
+		Handler:           web.New(web.Deps{Store: st, Sessions: sessions}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

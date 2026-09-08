@@ -4,6 +4,8 @@ go 1.26.5
 
 require (
 	github.com/a-h/templ v0.3.1020
+	github.com/emersion/go-vcard v0.1.0
+	github.com/emersion/go-webdav v0.7.0
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/redis/go-redis/v9 v9.22.0

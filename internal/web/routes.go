@@ -15,18 +15,23 @@ import (
 	"example.com/segments/internal/web/layouts"
 	"example.com/segments/internal/web/pages"
 	"example.com/segments/internal/web/seg"
+	"example.com/segments/internal/web/webdavsvc"
 )
 
 type Deps struct {
 	Store    *store.Store
 	Sessions *auth.SessionManager
-	Users    *store.Users
 }
 
 func New(d Deps) http.Handler {
 	r := chi.NewRouter()
 
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("assets"))))
+
+	r.Mount("/carddav", webdavsvc.New(store.NewUsers(d.Store.PG), d.Store.PG))
+	r.Handle("/.well-known/carddav", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/carddav/", http.StatusFound)
+	}))
 
 	root := seg.Segment{
 		ID: "root",
@@ -58,7 +63,7 @@ func New(d Deps) http.Handler {
 			if !ok {
 				return nil, http.ErrNoCookie
 			}
-			u, err := d.Users.ByID(ctx, uid)
+			u, err := store.NewUsers(d.Store.PG).ByID(ctx, uid)
 			if err != nil {
 				return nil, err
 			}
@@ -161,7 +166,7 @@ func New(d Deps) http.Handler {
 func handleLogin(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
-		u, err := d.Users.ByEmail(r.Context(), r.FormValue("email"))
+		u, err := store.NewUsers(d.Store.PG).ByLogin(r.Context(), r.FormValue("email"))
 		if err != nil || !store.CheckPassword(u, r.FormValue("password")) {
 			http.Error(w, "Invalid email or password", http.StatusUnauthorized)
 			return
