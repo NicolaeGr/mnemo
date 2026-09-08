@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"path"
-	"strings"
 
 	"github.com/emersion/go-vcard"
 	"github.com/emersion/go-webdav"
@@ -17,6 +16,7 @@ import (
 	"github.com/nicolaegr/mnemo/internal/model"
 	"github.com/nicolaegr/mnemo/internal/resolve"
 	"github.com/nicolaegr/mnemo/internal/store"
+	vcardmeta "github.com/nicolaegr/mnemo/internal/vcard"
 )
 
 func (b *backend) GetAddressObject(ctx context.Context, p string, _ *carddav.AddressDataRequest) (*carddav.AddressObject, error) {
@@ -46,7 +46,7 @@ func (b *backend) GetAddressObject(ctx context.Context, p string, _ *carddav.Add
 		if err != nil {
 			return err
 		}
-		if !anyVisible(bookIDs, visible) { // a card with no visible book is not found (C2.4)
+		if !anyVisible(bookIDs, visible) { // a card with no visible book is not found
 			return model.ErrNotFound
 		}
 		card, err := vcard.NewDecoder(bytes.NewBufferString(c.VCardText)).Decode()
@@ -137,17 +137,11 @@ func (b *backend) PutAddressObject(ctx context.Context, p string, card vcard.Car
 		return nil, err
 	}
 
-	ensureFormattedName(card)
-
-	var buf bytes.Buffer
-	if err := vcard.NewEncoder(&buf).Encode(card); err != nil {
-		return nil, err
-	}
-	text := normalizeVCards(buf.String())
-
-	meta, err := json.Marshal(buildSearchMeta(card))
+	vcardmeta.EnsureFormattedName(card)
+	text := vcardmeta.CanonicalText(card)
+	meta, err := json.Marshal(vcardmeta.SearchMeta(card))
 	if err != nil {
-		return nil, fmt.Errorf("webdavsvc: marshal search meta: %w", err)
+		return nil, fmt.Errorf("marshal search meta: %w", err)
 	}
 	cond, err := putPrecondition(opts)
 	if err != nil {
@@ -161,7 +155,7 @@ func (b *backend) PutAddressObject(ctx context.Context, p string, card vcard.Car
 		}
 		res, err = s.PutContact(ctx, store.PutContactParams{
 			Filename:   objPath,
-			UID:        deriveUID(card, objPath),
+			UID:        vcardmeta.DeriveUID(card, objPath),
 			VCardText:  text,
 			SearchMeta: meta,
 		}, cond)
@@ -178,8 +172,8 @@ func (b *backend) PutAddressObject(ctx context.Context, p string, card vcard.Car
 		return nil, txErr
 	}
 
-	// Library quotes ao.ETag on the wire (internal.ETag.String) and the client
-	// unquotes once; the raw hex (as stored, I3) is the correct value here.
+	// go-webdav quotes the ETag on the wire and clients unquote once, so the raw
+	// hex stored here is the correct value to return.
 	return &carddav.AddressObject{Path: p, ETag: res.ETag, Card: card}, nil
 }
 
@@ -209,8 +203,8 @@ func (b *backend) DeleteAddressObject(ctx context.Context, p string) error {
 	return nil
 }
 
-// putPrecondition translates the library's conditional headers into the
-// store's precondition model. Unparseable If-Match etags are a 400.
+// putPrecondition translates the library's conditional headers into the store's
+// precondition model. Unparseable If-Match etags are a 400.
 func putPrecondition(opts *carddav.PutAddressObjectOptions) (store.Precondition, error) {
 	if opts == nil {
 		return store.Precondition{}, nil
@@ -229,79 +223,6 @@ func putPrecondition(opts *carddav.PutAddressObjectOptions) (store.Precondition,
 		}
 	}
 	return cond, nil
-}
-
-func deriveUID(card vcard.Card, filename string) string {
-	if uid := card.Value(vcard.FieldUID); uid != "" {
-		return uid
-	}
-	if i := strings.LastIndex(filename, ".vcf"); i > 0 {
-		return filename[:i]
-	}
-	return filename
-}
-
-func normalizeVCards(s string) string {
-	out := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		if s[i] != '\r' {
-			out = append(out, s[i])
-		}
-	}
-	return string(out)
-}
-
-// ensureFormattedName gives the card an FN when absent, derived from N, then the
-// email local part, then a placeholder. Cards without FN break clients and are
-// unsearchable by name.
-func ensureFormattedName(card vcard.Card) {
-	if card.Value(vcard.FieldFormattedName) != "" {
-		return
-	}
-	if n := card.Name(); n != nil {
-		name := strings.TrimSpace(n.GivenName + " " + n.FamilyName)
-		if name != "" {
-			card.SetValue(vcard.FieldFormattedName, name)
-			return
-		}
-	}
-	if email := card.Value(vcard.FieldEmail); email != "" {
-		if at := strings.IndexByte(email, '@'); at > 0 {
-			card.SetValue(vcard.FieldFormattedName, email[:at])
-			return
-		}
-	}
-	card.SetValue(vcard.FieldFormattedName, "(unnamed)")
-}
-
-func buildSearchMeta(card vcard.Card) map[string]any {
-	rawTels := card.Values(vcard.FieldTelephone)
-	tels := make([]map[string]string, 0, len(rawTels))
-	norm := make([]string, 0, len(rawTels))
-	for _, raw := range rawTels {
-		digits := normalizePhone(raw)
-		tels = append(tels, map[string]string{"raw": raw, "norm": digits})
-		if digits != "" {
-			norm = append(norm, digits)
-		}
-	}
-	return map[string]any{
-		"fn":       card.Value(vcard.FieldFormattedName),
-		"emails":   card.Values(vcard.FieldEmail),
-		"org":      card.Value(vcard.FieldOrganization),
-		"tels":     tels,
-		"tel_norm": norm,
-	}
-}
-
-func normalizePhone(raw string) string {
-	var b strings.Builder
-	for i := 0; i < len(raw); i++ {
-		if c := raw[i]; c >= '0' && c <= '9' {
-			b.WriteByte(c)
-		}
-	}
-	return b.String()
 }
 
 func visibleIDs(visible map[int64]bool) []int64 {
