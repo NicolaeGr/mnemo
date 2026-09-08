@@ -5,17 +5,22 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
+	"github.com/emersion/go-vcard"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nicolaegr/mnemo/internal/auth"
 	"github.com/nicolaegr/mnemo/internal/model"
 	"github.com/nicolaegr/mnemo/internal/store"
+	vcardmeta "github.com/nicolaegr/mnemo/internal/vcard"
 )
 
 type api struct {
@@ -46,7 +51,9 @@ func New(users *store.Users, pool *pgxpool.Pool) http.Handler {
 
 	r.Route("/contacts", func(r chi.Router) {
 		r.Get("/", a.searchContacts)
+		r.Post("/", a.createContact)
 		r.Get("/{id}", a.getContact)
+		r.Patch("/{id}", a.updateContact)
 		r.Delete("/{id}", a.deleteContact)
 		r.Post("/{id}/tags", a.tagContact)
 	})
@@ -230,6 +237,140 @@ func (a *api) getContact(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	writeJSON(w, 200, out, err)
+}
+
+type contactIn struct {
+	VCard string  `json:"vcard"`
+	Tags  []int64 `json:"tags"`
+}
+
+// createContact stores a new card under a server-generated filename, defaulting
+// to the system book unless tags are given.
+func (a *api) createContact(w http.ResponseWriter, r *http.Request) {
+	actor, err := a.actor(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var body contactIn
+	if err := decodeJSON(r, &body); err != nil {
+		writeErr(w, err)
+		return
+	}
+	card, err := parseVCard(body.VCard)
+	if err != nil {
+		writeErr(w, model.ErrPrecondition)
+		return
+	}
+	vcardmeta.EnsureFormattedName(card)
+	text := vcardmeta.CanonicalText(card)
+	if text == "" {
+		writeErr(w, model.ErrPrecondition)
+		return
+	}
+	meta, err := json.Marshal(vcardmeta.SearchMeta(card))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	filename := uuidFilename()
+	uid := vcardmeta.DeriveUID(card, filename)
+
+	var out fullContactOut
+	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, actor.UserID); err != nil {
+			return err
+		}
+		if _, err := s.PutContact(r.Context(), store.PutContactParams{
+			Filename: filename, UID: uid, VCardText: text, SearchMeta: meta,
+		}, store.Precondition{}); err != nil {
+			return err
+		}
+		c, err := s.LiveContactByFilename(r.Context(), filename)
+		if err != nil {
+			return err
+		}
+		if len(body.Tags) > 0 {
+			if err := s.Retag(r.Context(), c.ID, body.Tags, nil); err != nil {
+				return err
+			}
+		}
+		out = fullContactOut{c.ID, c.UID, c.Filename, c.ETag, c.VCardText}
+		return nil
+	})
+	writeJSON(w, 201, out, err)
+}
+
+// updateContact replaces an existing contact's card.
+func (a *api) updateContact(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(w, r)
+	if err != nil {
+		return
+	}
+	actor, err := a.actor(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var body struct {
+		VCard string `json:"vcard"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeErr(w, err)
+		return
+	}
+	card, err := parseVCard(body.VCard)
+	if err != nil {
+		writeErr(w, model.ErrPrecondition)
+		return
+	}
+	vcardmeta.EnsureFormattedName(card)
+	text := vcardmeta.CanonicalText(card)
+	if text == "" {
+		writeErr(w, model.ErrPrecondition)
+		return
+	}
+	meta, err := json.Marshal(vcardmeta.SearchMeta(card))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+
+	var out fullContactOut
+	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, actor.UserID); err != nil {
+			return err
+		}
+		c, err := s.LiveContactByID(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		uid := vcardmeta.DeriveUID(card, c.Filename)
+		if _, err := s.PutContact(r.Context(), store.PutContactParams{
+			Filename: c.Filename, UID: uid, VCardText: text, SearchMeta: meta,
+		}, store.Precondition{}); err != nil {
+			return err
+		}
+		updated, err := s.LiveContactByFilename(r.Context(), c.Filename)
+		if err != nil {
+			return err
+		}
+		out = fullContactOut{updated.ID, updated.UID, updated.Filename, updated.ETag, updated.VCardText}
+		return nil
+	})
+	writeJSON(w, 200, out, err)
+}
+
+func parseVCard(text string) (vcard.Card, error) {
+	return vcard.NewDecoder(strings.NewReader(text)).Decode()
+}
+
+func uuidFilename() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b) + ".vcf"
 }
 
 // deleteContact soft-deletes one live contact by id.

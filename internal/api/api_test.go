@@ -147,6 +147,52 @@ func decode(t *testing.T, rec *httptest.ResponseRecorder, v any) {
 	}
 }
 
+func TestContactCreateUpdate(t *testing.T) {
+	pool := resetPool(t)
+	ctx := context.Background()
+	users := store.NewUsers(pool)
+	if _, _, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4); err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	ts := httptest.NewServer(api.New(users, pool))
+	defer ts.Close()
+	base := ts.URL
+
+	card := func(fn string) string {
+		return "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:urn:uuid:new-1\r\nFN:" + fn + "\r\nTEL:+1 555 0300\r\nEND:VCARD\r\n"
+	}
+	in, _ := json.Marshal(map[string]any{"vcard": card("Carol")})
+	created := call(t, ts, "POST", base+"/contacts", "", string(in))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create contact = %d, want 201: %s", created.Code, created.Body.String())
+	}
+	var out struct {
+		ID   int64  `json:"id"`
+		UID  string `json:"uid"`
+		ETag string `json:"etag"`
+	}
+	decode(t, created, &out)
+	if out.ID == 0 || out.ETag == "" {
+		t.Fatalf("created contact = %+v", out)
+	}
+
+	upd, _ := json.Marshal(map[string]any{"vcard": card("Carol Two")})
+	if resp := call(t, ts, "PATCH", base+"/contacts/"+strconv.FormatInt(out.ID, 10), "", string(upd)); resp.Code != http.StatusOK {
+		t.Fatalf("update contact = %d, want 200: %s", resp.Code, resp.Body.String())
+	}
+	get := call(t, ts, "GET", base+"/contacts/"+strconv.FormatInt(out.ID, 10), "", "")
+	if get.Code != http.StatusOK {
+		t.Fatalf("get after update = %d, want 200", get.Code)
+	}
+	var full struct {
+		VCardText string `json:"vcard_text"`
+	}
+	decode(t, get, &full)
+	if !strings.Contains(full.VCardText, "FN:Carol Two") {
+		t.Fatalf("updated vcard = %q, want FN:Carol Two", full.VCardText)
+	}
+}
+
 func resetPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url, err := testdb.URL("api")
