@@ -193,6 +193,70 @@ func TestContactCreateUpdate(t *testing.T) {
 	}
 }
 
+func TestAccountEndpoints(t *testing.T) {
+	pool := resetPool(t)
+	ctx := context.Background()
+	users := store.NewUsers(pool)
+	if _, _, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4); err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	ts := httptest.NewServer(api.New(users, pool))
+	defer ts.Close()
+	base := ts.URL
+
+	me := call(t, ts, "GET", base+"/me", "", "")
+	if me.Code != http.StatusOK {
+		t.Fatalf("GET /me = %d, want 200", me.Code)
+	}
+	var who struct {
+		Username string `json:"username"`
+	}
+	decode(t, me, &who)
+	if who.Username != "apiuser" {
+		t.Fatalf("/me username = %q, want apiuser", who.Username)
+	}
+
+	// Default book must be an owned book.
+	created := call(t, ts, "POST", base+"/books", "", `{"slug":"home","display_name":"Home"}`)
+	var book struct {
+		ID int64 `json:"id"`
+	}
+	decode(t, created, &book)
+	patch := `{"default_book_id":` + strconv.FormatInt(book.ID, 10) + `}`
+	if resp := call(t, ts, "PATCH", base+"/me/settings", "", patch); resp.Code != http.StatusNoContent {
+		t.Fatalf("PATCH /me/settings = %d, want 204", resp.Code)
+	}
+
+	// Signup is anonymous, then the new user can log in.
+	signup := anonRequest(t, ts, "POST", base+"/users", `{"username":"newbie","email":"newbie@example.com","name":"New","password":"secret"}`)
+	if signup.Code != http.StatusCreated {
+		t.Fatalf("signup = %d, want 201: %s", signup.Code, signup.Body.String())
+	}
+	if dup := anonRequest(t, ts, "POST", base+"/users", `{"username":"newbie","email":"newbie@example.com","name":"New","password":"secret"}`); dup.Code != http.StatusConflict {
+		t.Fatalf("duplicate signup = %d, want 409", dup.Code)
+	}
+
+	req, _ := http.NewRequest("GET", base+"/me", nil)
+	req.SetBasicAuth("newbie", "secret")
+	rec := httptest.NewRecorder()
+	ts.Config.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("newbie /me = %d, want 200", rec.Code)
+	}
+}
+
+func anonRequest(t *testing.T, ts *httptest.Server, method, url, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req, err := http.NewRequest(method, url, bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("req: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	ts.Config.Handler.ServeHTTP(rec, req)
+	return rec
+}
+
 func resetPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url, err := testdb.URL("api")

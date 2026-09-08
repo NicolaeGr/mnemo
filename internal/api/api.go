@@ -1,7 +1,7 @@
-// Package api exposes the minimal REST surface that drives book and tag
-// mutations, so device principals actually see epoch bumps. Auth is the same
-// Bearer-or-Basic scheme as the DAV plane; every request acts as the resolved
-// user.
+// Package api exposes the REST surface that drives book and tag mutations and
+// account management, so device principals actually see epoch bumps. Auth is
+// the same Bearer-or-Basic scheme as the DAV plane except for user signup,
+// which is anonymous. Every other request acts as the resolved user.
 package api
 
 import (
@@ -16,6 +16,7 @@ import (
 	"github.com/emersion/go-vcard"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/nicolaegr/mnemo/internal/auth"
 	"github.com/nicolaegr/mnemo/internal/model"
@@ -58,9 +59,21 @@ func New(users *store.Users, pool *pgxpool.Pool) http.Handler {
 		r.Post("/{id}/tags", a.tagContact)
 	})
 
+	r.Route("/me", func(r chi.Router) {
+		r.Get("/", a.me)
+		r.Patch("/settings", a.updateSettings)
+	})
+
 	r.Post("/events/force-resync", a.forceResync)
 
-	return auth.RequireDAV(users, store.NewPrincipals(pool), r)
+	authed := auth.RequireDAV(users, store.NewPrincipals(pool), r)
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == http.MethodPost && req.URL.Path == "/users" {
+			a.signup(w, req)
+			return
+		}
+		authed.ServeHTTP(w, req)
+	})
 }
 
 type bookBody struct {
@@ -597,6 +610,66 @@ func (a *api) clearOverride(w http.ResponseWriter, r *http.Request) {
 	writeErr(w, err)
 }
 
+type meOut struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+}
+
+// me returns the authenticated account.
+func (a *api) me(w http.ResponseWriter, r *http.Request) {
+	actor, err := a.actor(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	u, err := a.users.ByID(r.Context(), actor.UserID)
+	writeJSON(w, 200, meOut{u.ID, u.Username, u.Email, u.Name}, err)
+}
+
+type settingsPatch struct {
+	DefaultBookID *int64 `json:"default_book_id"`
+}
+
+// updateSettings points the account's default book at an owned book.
+func (a *api) updateSettings(w http.ResponseWriter, r *http.Request) {
+	actor, err := a.actor(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var body settingsPatch
+	if err := decodeJSON(r, &body); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if body.DefaultBookID == nil {
+		writeErr(w, model.ErrPrecondition)
+		return
+	}
+	err = a.users.SetDefaultBook(r.Context(), actor.UserID, *body.DefaultBookID)
+	writeErr(w, err)
+}
+
+type signupIn struct {
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
+// signup creates an account with its system book. Anonymous.
+func (a *api) signup(w http.ResponseWriter, r *http.Request) {
+	var body signupIn
+	if err := decodeJSON(r, &body); err != nil {
+		writeErr(w, err)
+		return
+	}
+	u, _, err := a.users.Signup(r.Context(), body.Username, body.Email, body.Name, body.Password, bcrypt.DefaultCost)
+	writeJSON(w, 201, meOut{u.ID, u.Username, u.Email, u.Name}, err)
+}
+
 func bookParam(w http.ResponseWriter, r *http.Request) (int64, error) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "book"), 10, 64)
 	if err != nil {
@@ -661,7 +734,11 @@ func writeErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, model.ErrNotFound):
 		status, code = http.StatusNotFound, "not_found"
-	case errors.Is(err, model.ErrConflict), errors.Is(err, model.ErrUIDConflict), errors.Is(err, model.ErrFilenameRetired):
+	case errors.Is(err, model.ErrConflict),
+		errors.Is(err, model.ErrUIDConflict),
+		errors.Is(err, model.ErrFilenameRetired),
+		errors.Is(err, model.ErrUsernameTaken),
+		errors.Is(err, model.ErrEmailTaken):
 		status, code = http.StatusConflict, "conflict"
 	case errors.Is(err, model.ErrPrecondition):
 		status, code = http.StatusBadRequest, "bad_request"
