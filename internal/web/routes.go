@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/nicolaegr/mnemo/internal/api"
 	"github.com/nicolaegr/mnemo/internal/store"
@@ -12,16 +13,28 @@ type Deps struct {
 	Store *store.Store
 }
 
-// New wires the whole server: CardDAV at the root (webdavsvc paths start with
-// /carddav and must not be remounted under a prefix), the REST API under
-// /api/v1, and the well-known discovery redirect.
+// New wires the whole server. CardDAV serves at the root because webdavsvc's
+// paths already start with /carddav and must not be remounted under a prefix.
+// The REST API lives under /api/v1 and sees its own routes (the prefix is
+// stripped here).
 func New(d Deps) http.Handler {
 	users := store.NewUsers(d.Store.PG)
-	mux := http.NewServeMux()
-	mux.HandleFunc("/.well-known/carddav", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/carddav/", http.StatusMovedPermanently)
+	dav := webdavsvc.New(users, d.Store.PG)
+	rest := api.New(users, d.Store.PG)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/carddav" {
+			http.Redirect(w, r, "/carddav/", http.StatusMovedPermanently)
+			return
+		}
+		if suffix, ok := strings.CutPrefix(r.URL.Path, "/api/v1"); ok {
+			path := "/" + strings.TrimPrefix(suffix, "/")
+			stripped := r.Clone(r.Context())
+			stripped.URL.Path = path
+			stripped.URL.RawPath = ""
+			rest.ServeHTTP(w, stripped)
+			return
+		}
+		dav.ServeHTTP(w, r)
 	})
-	mux.Handle("/api/v1/", api.New(users, d.Store.PG))
-	mux.Handle("/", webdavsvc.New(users, d.Store.PG))
-	return mux
 }

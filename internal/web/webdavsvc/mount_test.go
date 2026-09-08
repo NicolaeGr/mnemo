@@ -51,4 +51,19 @@ func TestAppServesCarddavAtRoot(t *testing.T) {
 	if !strings.Contains(buf.String(), "getctag") {
 		t.Fatalf("response missing getctag:\n%s", buf.String())
 	}
+
+	// The REST API is also reachable under the same router.
+	apireq, err := http.NewRequest("GET", ts.URL+"/api/v1/principals", nil)
+	if err != nil {
+		t.Fatalf("api req: %v", err)
+	}
+	apireq.SetBasicAuth(testUsername, testPassword)
+	apiresp, err := ts.Client().Do(apireq)
+	if err != nil {
+		t.Fatalf("api: %v", err)
+	}
+	defer apiresp.Body.Close()
+	if apiresp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/v1/principals = %d, want 200", apiresp.StatusCode)
+	}
 }
