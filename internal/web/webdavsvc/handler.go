@@ -11,7 +11,7 @@ import (
 )
 
 // New builds the CardDAV handler for the whole DAV plane. Identity is resolved
-// per request from the Basic credential (auth.RequireBasic, §4.1); no userID is
+// per request from the Basic credential (auth.RequireBasic); no userID is
 // injected at construction time.
 //
 // The go-webdav client PROPFINDs the server root ("/") for current-user-principal,

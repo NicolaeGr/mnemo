@@ -1,6 +1,6 @@
-// Package resolve implements §6.1 visibility: which of a user's books a caller
-// can see. The decision is pure (Compute); Resolver just loads the inputs from
-// the scoped store. Callers cache the result per request.
+// Package resolve decides which of a user's books a caller can see. The
+// decision is pure (Compute); Resolver loads the inputs from the scoped store,
+// and callers cache the result per request.
 package resolve
 
 import (
@@ -12,7 +12,8 @@ import (
 // Resolver loads and answers visibility questions against a scoped store.
 type Resolver struct{}
 
-// VisibleBooks returns book id → visible for the actor on s. See Compute.
+// VisibleBooks returns, for each active book, whether the actor can see it on
+// s. See Compute.
 func (Resolver) VisibleBooks(ctx context.Context, s store.ScopedStore) (map[int64]bool, error) {
 	active, err := s.ActiveBooks(ctx)
 	if err != nil {
@@ -25,9 +26,9 @@ func (Resolver) VisibleBooks(ctx context.Context, s store.ScopedStore) (map[int6
 	return Compute(active, principal.Tier, principal.Overrides), nil
 }
 
-// Compute applies the §6.1 rule: an active book is visible to a tier-all caller
-// (empty tier) or when the caller's tier is in the book's synced_tiers, then a
-// principal's book is hidden again if an override disables it.
+// Compute reports which of the active books a caller can see: visible to a
+// tier-all caller (empty tier) or when the caller's tier is in the book's
+// synced_tiers, and hidden again if an override disables it.
 func Compute(active []store.Book, tier string, overrides map[int64]bool) map[int64]bool {
 	visible := make(map[int64]bool, len(active))
 	for _, b := range active {

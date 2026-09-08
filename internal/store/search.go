@@ -8,13 +8,13 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ContactSearch is a page of §8.2 search results.
+// ContactSearch is a page of search results.
 type ContactSearch struct {
 	Contacts []Contact
 	NextPage bool
 }
 
-// SearchParams bounds a §8.2 contact search. Query is matched case-insensitively
+// SearchParams bounds a contact search. Query is matched case-insensitively
 // against FN via the trgm index; BookID, when non-nil, restricts to a single
 // tag (join on contact_books). Page is 1-based.
 type SearchParams struct {
@@ -24,9 +24,8 @@ type SearchParams struct {
 	Per    int
 }
 
-// Search returns live contacts matching q (fn trigram match) scoped by the
-// actor's user and, optionally, one book. Intended for GET /contacts (§9) and
-// any resolver-filtered UI search.
+// Search returns live contacts matching q (fn trigram match), scoped by the
+// actor's user and, optionally, one book.
 func (s ScopedStore) Search(ctx context.Context, p SearchParams) (ContactSearch, error) {
 	per := p.Per
 	if per <= 0 || per > 100 {

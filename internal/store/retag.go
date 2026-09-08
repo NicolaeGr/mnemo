@@ -9,11 +9,11 @@ import (
 	"example.com/segments/internal/model"
 )
 
-// Retag applies add/remove of the actor's own book tags to a live contact
-// (§5.5). Removing the system book is ignored; I1 is restored by re-adding the
-// system book when nothing would remain. No change rows are written, but the
-// sync_epoch of every principal whose visibility of the card changed is bumped
-// (§6.3). Caller holds LockSync.
+// Retag applies add/remove of the actor's own book tags to a live contact.
+// Removing the system book is ignored; the system book is re-added when
+// nothing would remain. No change rows are written, but the sync_epoch of every
+// principal whose visibility of the card changed is bumped. Caller holds
+// LockSync.
 func (s ScopedStore) Retag(ctx context.Context, contactID int64, addBookIDs, removeBookIDs []int64) error {
 	var one int
 	err := s.Tx.QueryRow(ctx, `
@@ -75,9 +75,9 @@ func (s ScopedStore) tagSet(ctx context.Context, contactID int64) (map[int64]str
 	return set, rows.Err()
 }
 
-// applyRetag computes the final tag set from §5.5 rules: only the actor's own
-// active books may be added, system removal is dropped, and an empty result is
-// repaired to just the system book (I1).
+// applyRetag computes the final tag set: only the actor's own active books may
+// be added, system removal is dropped, and an empty result is repaired to just
+// the system book.
 func applyRetag(before map[int64]struct{}, systemID int64, active []Book, addIDs, removeIDs []int64) map[int64]struct{} {
 	after := make(map[int64]struct{}, len(before)+len(addIDs))
 	for id := range before {
@@ -92,7 +92,7 @@ func applyRetag(before map[int64]struct{}, systemID int64, active []Book, addIDs
 		}
 	}
 	for _, id := range removeIDs {
-		if id != systemID { // system detach is ignored (§5.5)
+		if id != systemID { // detaching the system book is ignored
 			delete(after, id)
 		}
 	}
@@ -121,8 +121,8 @@ func (s ScopedStore) replaceTags(ctx context.Context, contactID int64, want map[
 }
 
 // principalsWhoseVisibilityChanged returns the user's principals whose view of
-// the card flipped between before and after (§6.3): a principal cares only
-// whether the card sits in >= 1 book it can see (tier match, not disabled).
+// the card flipped between before and after: a principal cares only whether the
+// card sits in >= 1 book it can see (tier match, not disabled).
 func (s ScopedStore) principalsWhoseVisibilityChanged(ctx context.Context, active []Book, before, after map[int64]struct{}) ([]int64, error) {
 	rows, err := s.Tx.Query(ctx, `
 		SELECT id, tier FROM principals WHERE user_id = $1`, s.Actor.UserID)

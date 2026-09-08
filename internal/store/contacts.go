@@ -28,13 +28,13 @@ type Contact struct {
 	UpdatedAt  time.Time
 }
 
-// Precondition carries the request's conditional headers (§5.3).
+// Precondition carries the request's conditional headers.
 type Precondition struct {
 	IfMatch        *string // quoted etag or "*"; nil = absent
 	IfNoneMatchAll bool    // If-None-Match: *
 }
 
-// PutContactParams feeds a §5.3 PUT.
+// PutContactParams feeds a PUT.
 type PutContactParams struct {
 	Filename   string
 	UID        string
@@ -42,7 +42,7 @@ type PutContactParams struct {
 	SearchMeta []byte
 }
 
-// PutResult reports the outcome of a §5.3 PUT.
+// PutResult reports the outcome of a PUT.
 type PutResult struct {
 	Created bool
 	ETag    string
@@ -58,8 +58,8 @@ func scanContact(row pgx.Row) (Contact, error) {
 	return c, err
 }
 
-// ListContactsInBooks returns live contacts tagged in ≥1 of the given books,
-// ordered by filename. Empty book set means no contacts (everything is
+// ListContactsInBooks returns live contacts tagged in at least one of the
+// given books, ordered by filename. Empty book set means no contacts (everything is
 // invisible).
 func (s ScopedStore) ListContactsInBooks(ctx context.Context, bookIDs []int64) ([]Contact, error) {
 	if len(bookIDs) == 0 {
@@ -111,7 +111,8 @@ func (s ScopedStore) ContactBookIDs(ctx context.Context, contactID int64) ([]int
 	return ids, rows.Err()
 }
 
-// LiveContactByFilename returns one live contact by filename; miss → ErrNotFound.
+// LiveContactByFilename returns one live contact by filename, or ErrNotFound
+// on a miss.
 func (s ScopedStore) LiveContactByFilename(ctx context.Context, filename string) (Contact, error) {
 	return scanContact(s.Tx.QueryRow(ctx, `
 		SELECT id, filename, vcard_text, uid, search_meta, etag,
@@ -121,10 +122,10 @@ func (s ScopedStore) LiveContactByFilename(ctx context.Context, filename string)
 		s.Actor.UserID, filename))
 }
 
-// PutContact implements §5.3: precondition handling, live-UID dedupe, default
-// system-book tagging on create, and a contact_changes 'put' row. Returns
+// PutContact handles preconditions, live-UID dedupe, default system-book
+// tagging on create, and a contact_changes 'put' row. Failure paths return
 // ErrPrecondition (412), ErrNotFound (404), ErrUIDConflict or ErrFilenameRetired
-// (409) on the failure paths. Caller must hold the C2.3 lock.
+// (409). Caller must hold the sync lock.
 func (s ScopedStore) PutContact(ctx context.Context, p PutContactParams, cond Precondition) (PutResult, error) {
 	text := normalizeLineEndings(p.VCardText)
 	etag := sha256Hex(text)
@@ -146,7 +147,7 @@ func (s ScopedStore) PutContact(ctx context.Context, p PutContactParams, cond Pr
 	}
 
 	if cond.IfNoneMatchAll {
-		// If-None-Match:*: create-only. Existing (live) resource → 412.
+		// If-None-Match:*: create-only. An existing live resource returns 412.
 		created, err := s.insertContact(ctx, p, text, etag)
 		if err != nil {
 			return PutResult{}, err
@@ -211,8 +212,9 @@ func (s ScopedStore) afterPutChange(ctx context.Context, filename string, res Pu
 	return res, nil
 }
 
-// ifMatchMiss resolves an If-Match update that matched zero rows (§5.3):
-// a live contact exists but failed the etag predicate → 412, else → 404.
+// ifMatchMiss resolves an If-Match update that matched zero rows: a live
+// contact that exists but failed the etag predicate returns 412; anything
+// else returns 404.
 func (s ScopedStore) ifMatchMiss(ctx context.Context, filename string) error {
 	var deletedAt *time.Time
 	err := s.Tx.QueryRow(ctx, `
@@ -270,7 +272,7 @@ func (s ScopedStore) tagSystemBook(ctx context.Context, contactID int64) error {
 	return err
 }
 
-// DeleteContact implements §5.4: soft delete + contact_changes 'delete'.
+// DeleteContact soft-deletes a contact and appends a 'delete' change.
 // Returns false + nil when the named contact does not exist.
 func (s ScopedStore) DeleteContact(ctx context.Context, filename string) (bool, error) {
 	tag, err := s.Tx.Exec(ctx, `
@@ -290,7 +292,7 @@ func (s ScopedStore) DeleteContact(ctx context.Context, filename string) (bool, 
 	return true, nil
 }
 
-// Prune hard-deletes contacts tombstoned before the given cutoff (§11).
+// Prune hard-deletes contacts tombstoned before the given cutoff.
 func (s ScopedStore) Prune(ctx context.Context, before time.Time, limit int) (int64, error) {
 	rows, err := s.Tx.Query(ctx, `
 		SELECT id FROM contacts
@@ -348,7 +350,7 @@ func mapUIDConflict(ctx context.Context, s ScopedStore, uid string) error {
 	return &UIDConflictError{Filename: filename}
 }
 
-// UIDConflictError names the live contact already holding the UID (§5.3 409).
+// UIDConflictError names the live contact already holding the UID (409).
 type UIDConflictError struct {
 	Filename string
 }

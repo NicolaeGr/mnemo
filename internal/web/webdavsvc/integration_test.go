@@ -132,7 +132,7 @@ func assertETagIsBodyHash(t *testing.T, pool *pgxpool.Pool, username string, eta
 	}
 }
 
-// TestChangeStreamAndSoftDelete pins the §5.3/§5.4 storage contract behind the
+// TestChangeStreamAndSoftDelete pins the PUT/DELETE storage contract behind the
 // DAV layer: every PUT appends exactly one 'put' change, DELETE soft-deletes
 // (row stays, deleted_at set) and appends one 'delete' change.
 func TestChangeStreamAndSoftDelete(t *testing.T) {
@@ -179,7 +179,7 @@ func TestChangeStreamAndSoftDelete(t *testing.T) {
 		t.Fatalf("changes after delete = %+v, want third row of type delete", changes)
 	}
 
-	// Soft delete: the row survives with deleted_at set (I4 / §5.4).
+	// Soft delete: the row survives with deleted_at set.
 	var deletedAt *time.Time
 	var filename string
 	if err := pool.QueryRow(ctx,
@@ -190,7 +190,7 @@ func TestChangeStreamAndSoftDelete(t *testing.T) {
 		t.Fatalf("fetch tombstone: %v", err)
 	}
 	if deletedAt == nil {
-		t.Fatal("DELETE hard-deleted the row; §5.4 requires a soft delete")
+		t.Fatal("DELETE hard-deleted the row; it should have been a soft delete")
 	}
 	if filename != "bob.vcf" {
 		t.Fatalf("tombstoned filename = %q, want bob.vcf", filename)

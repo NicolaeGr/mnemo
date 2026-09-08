@@ -9,9 +9,9 @@ import (
 	"example.com/segments/internal/web/seg"
 )
 
-// RedisCache implements seg.Cache on Redis: values are stored as JSON with a
-// TTL. When the segment provides a Decode func, the typed value is rebuilt
-// from the stored bytes; otherwise the raw JSON is returned as-is.
+// RedisCache implements seg.Cache on Redis. It stores values as JSON with a
+// TTL. When the segment provides a Decode func, it rebuilds the typed value
+// from the stored bytes; otherwise it returns the raw JSON as-is.
 type RedisCache struct {
 	rdb *redis.Client
 }

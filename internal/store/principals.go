@@ -13,7 +13,7 @@ import (
 	"example.com/segments/internal/model"
 )
 
-// Principal is one row of principals: a device/app/credential (§4.1).
+// Principal is one row of principals: a device/app/credential.
 type Principal struct {
 	ID           int64
 	UserID       int64
@@ -35,8 +35,7 @@ func NewPrincipals(pool *pgxpool.Pool) *PrincipalStore {
 }
 
 // IssueToken creates a principal with a fresh device token and returns the raw
-// token exactly once (§4.1 / §9 principals POST). The raw token is never
-// stored; only its sha256 hex hash is.
+// token, shown to the client exactly once; only its hash is stored.
 func (p *PrincipalStore) IssueToken(ctx context.Context, userID int64, tier, label string) (Principal, string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -56,7 +55,7 @@ func (p *PrincipalStore) IssueToken(ctx context.Context, userID int64, tier, lab
 }
 
 // ByTokenHash resolves a bearer credential to exactly one principal or none
-// (I7). Not found → model.ErrNotFound.
+// (I7). A token that matches no principal returns model.ErrNotFound.
 func (p *PrincipalStore) ByTokenHash(ctx context.Context, tokenHash string) (Principal, error) {
 	var pr Principal
 	err := scanPrincipal(p.pool.QueryRow(ctx, `
@@ -102,8 +101,8 @@ func TokenHashOf(token string) string {
 }
 
 // BumpPrincipalsEpoch atomically advances sync_epoch for the given principal
-// ids inside tx (caller holds the C2.3 lock) using the §5.6 primitive. Returns
-// the new epoch value.
+// ids inside the current tx (caller holds the sync lock). Returns the new
+// epoch value.
 func BumpPrincipalsEpoch(ctx context.Context, tx pgx.Tx, ids []int64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil

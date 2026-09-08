@@ -20,7 +20,7 @@ const (
 // The go-webdav carddav.Handler derives every resource type from PATH DEPTH
 // relative to Prefix: depth 1 is a user principal, depth 2 the address-book
 // home set, depth 3 an address book, depth 4+ an address object. The DAV
-// surface therefore nests the single address book (the system book, slug
+// namespace therefore nests the single address book (the system book, slug
 // 'all') under the home set:
 //
 //	/carddav/{username}/                     user principal (depth 1)

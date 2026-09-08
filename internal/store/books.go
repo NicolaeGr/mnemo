@@ -25,7 +25,7 @@ type Book struct {
 	CreatedAt   time.Time
 }
 
-// Signup creates a user + settings + system book in one tx (§5.1).
+// Signup creates a user + settings + system book in one tx.
 func (u *Users) Signup(ctx context.Context, username, email, name, password string, bcryptCost int) (User, Book, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
@@ -83,7 +83,7 @@ func mapSignupError(err error) error {
 }
 
 // ActiveBooks lists the actor's active books within the current tx (the read
-// the resolver is built on, §6.1).
+// the resolver is built on).
 func (s ScopedStore) ActiveBooks(ctx context.Context) ([]Book, error) {
 	rows, err := s.Tx.Query(ctx, `
 		SELECT id, owner_user_id, slug, display_name, description, sort_order,
@@ -105,6 +105,144 @@ func (s ScopedStore) ActiveBooks(ctx context.Context) ([]Book, error) {
 		books = append(books, book)
 	}
 	return books, rows.Err()
+}
+
+// CreateBook adds a new active book (default synced_tiers) for the actor. A
+// duplicate slug is ErrConflict. A new empty book changes nothing a principal
+// syncs, so there is no epoch bump.
+func (s ScopedStore) CreateBook(ctx context.Context, slug, displayName string, description *string, sortOrder int) (Book, error) {
+	var b Book
+	err := s.Tx.QueryRow(ctx, `
+		INSERT INTO books (owner_user_id, slug, display_name, description, sort_order)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, owner_user_id, slug, display_name, description, sort_order,
+		          is_active, is_system, synced_tiers::text[], created_at`,
+		s.Actor.UserID, slug, displayName, description, sortOrder,
+	).Scan(&b.ID, &b.OwnerUserID, &b.Slug, &b.DisplayName, &b.Description,
+		&b.SortOrder, &b.IsActive, &b.IsSystem, &b.SyncedTiers, &b.CreatedAt)
+	if isUniqueViolation(err) {
+		return Book{}, model.ErrConflict
+	}
+	return b, err
+}
+
+// SetBookActive activates/deactivates a book. Flipping is_active changes the
+// union every principal syncs, so it bumps them all; no-op if the value is
+// unchanged. Caller holds LockSync.
+func (s ScopedStore) SetBookActive(ctx context.Context, bookID int64, active bool) error {
+	if err := s.requireOwnedBook(ctx, bookID); err != nil {
+		return err
+	}
+	tag, err := s.Tx.Exec(ctx, `
+		UPDATE books SET is_active = $3
+		 WHERE owner_user_id = $1 AND id = $2 AND is_active <> $3`,
+		s.Actor.UserID, bookID, active)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		return s.bumpAllPrincipals(ctx)
+	}
+	return nil
+}
+
+// SetBookTiers replaces a book's synced_tiers; a real change bumps all of the
+// actor's principals. Caller holds LockSync.
+func (s ScopedStore) SetBookTiers(ctx context.Context, bookID int64, tiers []string) error {
+	if err := s.requireOwnedBook(ctx, bookID); err != nil {
+		return err
+	}
+	tag, err := s.Tx.Exec(ctx, `
+		UPDATE books SET synced_tiers = $3::principal_tier[]
+		 WHERE owner_user_id = $1 AND id = $2 AND synced_tiers <> $3::principal_tier[]`,
+		s.Actor.UserID, bookID, tiers)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		return s.bumpAllPrincipals(ctx)
+	}
+	return nil
+}
+
+// DeleteBook removes a non-system book, folding its tags onto the system book
+// first so every contact keeps a tag, then bumps all principals. System-book
+// deletion is ErrConflict. Caller holds LockSync.
+func (s ScopedStore) DeleteBook(ctx context.Context, bookID int64) error {
+	var isSystem bool
+	if err := s.Tx.QueryRow(ctx, `
+		SELECT is_system FROM books WHERE owner_user_id = $1 AND id = $2`,
+		s.Actor.UserID, bookID).Scan(&isSystem); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return model.ErrNotFound
+		}
+		return err
+	}
+	if isSystem {
+		return model.ErrConflict
+	}
+
+	var systemID int64
+	if err := s.Tx.QueryRow(ctx,
+		`SELECT id FROM books WHERE owner_user_id = $1 AND is_system`, s.Actor.UserID,
+	).Scan(&systemID); err != nil {
+		return err
+	}
+	if _, err := s.Tx.Exec(ctx, `
+		INSERT INTO contact_books (contact_id, book_id)
+		SELECT contact_id, $1 FROM contact_books WHERE book_id = $2
+		ON CONFLICT DO NOTHING`, systemID, bookID); err != nil {
+		return err
+	}
+	if _, err := s.Tx.Exec(ctx, `DELETE FROM contact_books WHERE book_id = $1`, bookID); err != nil {
+		return err
+	}
+	if _, err := s.Tx.Exec(ctx, `DELETE FROM books WHERE id = $1`, bookID); err != nil {
+		return err
+	}
+	return s.bumpAllPrincipals(ctx)
+}
+
+func (s ScopedStore) requireOwnedBook(ctx context.Context, bookID int64) error {
+	var one int
+	err := s.Tx.QueryRow(ctx,
+		`SELECT 1 FROM books WHERE owner_user_id = $1 AND id = $2`,
+		s.Actor.UserID, bookID).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.ErrNotFound
+	}
+	return err
+}
+
+func (s ScopedStore) bumpAllPrincipals(ctx context.Context) error {
+	ids, err := s.principalIDs(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = BumpPrincipalsEpoch(ctx, s.Tx, ids)
+	return err
+}
+
+func (s ScopedStore) principalIDs(ctx context.Context) ([]int64, error) {
+	rows, err := s.Tx.Query(ctx, `SELECT id FROM principals WHERE user_id = $1`, s.Actor.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 func scanBook(row pgx.Row) (Book, error) {

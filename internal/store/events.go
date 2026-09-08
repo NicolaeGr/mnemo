@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Event is one user_events outbox row (§10).
+// Event is one user_events outbox row.
 type Event struct {
 	ID           int64
 	TargetUserID int64
@@ -31,8 +31,8 @@ func EnqueueEvent(ctx context.Context, pool *pgxpool.Pool, targetUserID int64, k
 	return err
 }
 
-// ClaimEvents claims a batch of pending events for a target partition
-// (§10): FOR UPDATE SKIP LOCKED in autocommit. Returns claimed rows.
+// ClaimEvents claims a batch of pending events for a target partition:
+// FOR UPDATE SKIP LOCKED in autocommit. Returns claimed rows.
 func ClaimEvents(ctx context.Context, pool *pgxpool.Pool, limit int) ([]Event, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT id, target_user_id, kind, payload, initiated_by, created_at, dispatched_at
@@ -65,7 +65,7 @@ func MarkEventDispatched(ctx context.Context, pool *pgxpool.Pool, id int64) erro
 	return err
 }
 
-// PendingEventCount reports outbox backlog depth (watchdog input, §11).
+// PendingEventCount reports outbox backlog depth (watchdog input).
 func PendingEventCount(ctx context.Context, pool *pgxpool.Pool, olderThan time.Duration) (int64, error) {
 	var n int64
 	err := pool.QueryRow(ctx, `

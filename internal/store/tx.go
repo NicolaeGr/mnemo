@@ -10,8 +10,8 @@ import (
 )
 
 // ScopedStore carries a live transaction plus the acting principal so every
-// repository method can weave user_id (and, where relevant, tier) scoping into
-// its SQL without threading args (C2.2).
+// repository method can apply user_id (and, where relevant, tier) scoping in
+// its SQL without passing those values as arguments (C2.2).
 type ScopedStore struct {
 	Tx    pgx.Tx
 	Actor model.Actor

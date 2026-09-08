@@ -59,7 +59,7 @@ func TestRetag(t *testing.T) {
 	}
 
 	// Adding/removing a book the primary principal already sees is invisible on
-	// the wire (same URL, same etag), so no epoch bump (§6.2).
+	// the wire (same URL, same etag), so no epoch bump.
 	epochPrim = epochOf(t, ctx, pool, primary)
 	retag(t, ctx, pool, user.ID, contact, []int64{home.ID}, nil)
 	retag(t, ctx, pool, user.ID, contact, nil, []int64{home.ID})

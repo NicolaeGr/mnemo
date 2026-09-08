@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Change is one contact_changes row (§6.4 stream material).
+// Change is one contact_changes row in the per-user sync stream.
 type Change struct {
 	ID         int64
 	UserID     int64
@@ -27,7 +27,7 @@ func AppendChange(ctx context.Context, tx pgx.Tx, userID int64, filename, change
 }
 
 // MaxCommittedChangeID returns the largest contact_changes.id for the user, or
-// 0 when the stream is empty. Used as the token tail (§6.4) and as getctag
+// 0 when the stream is empty. Used as the sync token tail and as getctag
 // material.
 func MaxCommittedChangeID(ctx context.Context, pool *pgxpool.Pool, userID int64) (int64, error) {
 	var id int64
@@ -43,7 +43,7 @@ type StreamOptions struct {
 	Limit   int
 }
 
-// StreamDeltas scans contact_changes after AfterID in id order (§6.4 mode D).
+// StreamDeltas scans contact_changes after AfterID in id order.
 func (s ScopedStore) StreamDeltas(ctx context.Context, o StreamOptions) ([]Change, error) {
 	rows, err := s.Tx.Query(ctx, `
 		SELECT id, user_id, filename, change_type, changed_at
@@ -67,8 +67,8 @@ func (s ScopedStore) StreamDeltas(ctx context.Context, o StreamOptions) ([]Chang
 	return out, rows.Err()
 }
 
-// LiveChangeSet collapses stream rows into {filename: highest id} for the
-// supplied rows (§6.4 collapse per filename keeping highest id).
+// LiveChangeSet collapses stream rows into {filename: highest id}, keeping the
+// highest id per filename.
 func LiveChangeSet(rows []Change) map[string]int64 {
 	set := make(map[string]int64, len(rows))
 	for _, c := range rows {

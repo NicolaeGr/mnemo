@@ -11,9 +11,9 @@ import (
 	"github.com/emersion/go-webdav/carddav"
 )
 
-// Wire-level status checks the carddav client hides from us. Pins the §5.3/§13
-// contract: stale If-Match -> 412, update onto a live UID -> 409, re-create of a
-// tombstoned filename -> 409.
+// Wire-level checks of statuses the carddav client hides from us: a stale
+// If-Match returns 412, an update onto a live UID returns 409, and re-creating
+// a tombstoned filename returns 409.
 func TestWireStatusCodes(t *testing.T) {
 	ts, pool := newTestServer(t)
 	defer ts.Close()
@@ -39,12 +39,12 @@ func TestWireStatusCodes(t *testing.T) {
 		t.Fatalf("create = %d (etag %q), want 201 with etag", code, etag)
 	}
 
-	// Same resource, stale If-Match -> 412 (the §13 / deliverable rule).
+	// A stale If-Match on an existing resource returns 412 (the deliverable rule).
 	if code, _ := putVCard(t, hc, base+"carol.vcf", `"not-the-current-etag"`, vcardText("carol", "Carol II")); code != http.StatusPreconditionFailed {
 		t.Fatalf("stale If-Match PUT = %d, want 412", code)
 	}
 
-	// Delete then re-create the same filename -> 409 (filename retired).
+	// Re-creating a deleted filename returns 409 (the filename is retired).
 	if code, _ := putVCard(t, hc, base+"dave.vcf", "", vcardText("dave", "Dave")); code != http.StatusCreated {
 		t.Fatalf("create dave = %d, want 201", code)
 	}
@@ -64,7 +64,7 @@ func TestWireStatusCodes(t *testing.T) {
 		t.Fatalf("re-create tombstoned dave = %d, want 409", code)
 	}
 
-	// Updating erin to reuse frank's live UID -> 409 (not a 500).
+	// Reusing frank's live UID when updating erin returns 409 (not a 500).
 	codeE, etagE := putVCard(t, hc, base+"erin.vcf", "", vcardText("erin", "Erin"))
 	if code, _ := putVCard(t, hc, base+"frank.vcf", "", vcardText("frank", "Frank")); code != http.StatusCreated {
 		t.Fatalf("create frank = %d, want 201", code)

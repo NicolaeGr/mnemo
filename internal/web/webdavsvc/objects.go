@@ -46,7 +46,7 @@ func (b *backend) GetAddressObject(ctx context.Context, p string, _ *carddav.Add
 		if err != nil {
 			return err
 		}
-		if !anyVisible(bookIDs, visible) { // invisible ≡ 404 (C2.4)
+		if !anyVisible(bookIDs, visible) { // a card with no visible book is not found (C2.4)
 			return model.ErrNotFound
 		}
 		card, err := vcard.NewDecoder(bytes.NewBufferString(c.VCardText)).Decode()
@@ -208,7 +208,7 @@ func (b *backend) DeleteAddressObject(ctx context.Context, p string) error {
 }
 
 // putPrecondition translates the library's conditional headers into the
-// store's §5.3 precondition model. Unparseable If-Match etags are a 400.
+// store's precondition model. Unparseable If-Match etags are a 400.
 func putPrecondition(opts *carddav.PutAddressObjectOptions) (store.Precondition, error) {
 	if opts == nil {
 		return store.Precondition{}, nil
