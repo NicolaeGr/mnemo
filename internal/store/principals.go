@@ -116,3 +116,47 @@ func BumpPrincipalsEpoch(ctx context.Context, tx pgx.Tx, ids []int64) (int64, er
 		RETURNING sync_epoch`, ids).Scan(&newEpoch)
 	return newEpoch, err
 }
+
+// PrincipalInfo is the visibility-relevant slice of the acting principal:
+// its tier ("" for password auth, i.e. tier-all) and its per-book overrides.
+// Overrides is non-nil only for a token-backed principal.
+type PrincipalInfo struct {
+	Tier      string
+	Overrides map[int64]bool
+}
+
+func (s ScopedStore) PrincipalInfo(ctx context.Context) (PrincipalInfo, error) {
+	var info PrincipalInfo
+	if s.Actor.PrincipalID == nil {
+		return info, nil
+	}
+	pid := *s.Actor.PrincipalID
+	if err := s.Tx.QueryRow(ctx, `
+		SELECT tier FROM principals
+		 WHERE id = $1 AND user_id = $2`, pid, s.Actor.UserID).Scan(&info.Tier); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return PrincipalInfo{}, model.ErrNotFound
+		}
+		return PrincipalInfo{}, err
+	}
+
+	info.Overrides = make(map[int64]bool)
+	rows, err := s.Tx.Query(ctx, `
+		SELECT o.book_id, o.enabled
+		  FROM principal_book_overrides o
+		  JOIN principals p ON p.id = o.principal_id
+		 WHERE p.id = $1 AND p.user_id = $2`, pid, s.Actor.UserID)
+	if err != nil {
+		return PrincipalInfo{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var bookID int64
+		var enabled bool
+		if err := rows.Scan(&bookID, &enabled); err != nil {
+			return PrincipalInfo{}, err
+		}
+		info.Overrides[bookID] = enabled
+	}
+	return info, rows.Err()
+}

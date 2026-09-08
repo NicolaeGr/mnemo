@@ -58,14 +58,20 @@ func scanContact(row pgx.Row) (Contact, error) {
 	return c, err
 }
 
-// ListLiveContacts returns the user's live contacts ordered by filename.
-func (s ScopedStore) ListLiveContacts(ctx context.Context) ([]Contact, error) {
+// ListContactsInBooks returns live contacts tagged in ≥1 of the given books,
+// ordered by filename. Empty book set means no contacts (everything is
+// invisible).
+func (s ScopedStore) ListContactsInBooks(ctx context.Context, bookIDs []int64) ([]Contact, error) {
+	if len(bookIDs) == 0 {
+		return []Contact{}, nil
+	}
 	rows, err := s.Tx.Query(ctx, `
-		SELECT id, filename, vcard_text, uid, search_meta, etag,
-		       modified_by, deleted_at, created_at, updated_at
-		  FROM contacts
-		 WHERE user_id = $1 AND deleted_at IS NULL
-		 ORDER BY filename`, s.Actor.UserID)
+		SELECT DISTINCT c.id, c.filename, c.vcard_text, c.uid, c.search_meta,
+		       c.etag, c.modified_by, c.deleted_at, c.created_at, c.updated_at
+		  FROM contacts c
+		  JOIN contact_books cb ON cb.contact_id = c.id
+		 WHERE c.user_id = $1 AND c.deleted_at IS NULL AND cb.book_id = ANY($2)
+		 ORDER BY c.filename`, s.Actor.UserID, bookIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +86,29 @@ func (s ScopedStore) ListLiveContacts(ctx context.Context) ([]Contact, error) {
 		contacts = append(contacts, c)
 	}
 	return contacts, rows.Err()
+}
+
+// ContactBookIDs returns the books a contact is tagged in, verified to be the
+// actor's own contact.
+func (s ScopedStore) ContactBookIDs(ctx context.Context, contactID int64) ([]int64, error) {
+	rows, err := s.Tx.Query(ctx, `
+		SELECT cb.book_id
+		  FROM contact_books cb
+		  JOIN contacts c ON c.id = cb.contact_id
+		 WHERE c.id = $1 AND c.user_id = $2`, contactID, s.Actor.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // LiveContactByFilename returns one live contact by filename; miss → ErrNotFound.

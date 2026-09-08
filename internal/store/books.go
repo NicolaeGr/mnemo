@@ -7,7 +7,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
 	"example.com/segments/internal/model"
@@ -22,6 +21,7 @@ type Book struct {
 	SortOrder   int
 	IsActive    bool
 	IsSystem    bool
+	SyncedTiers []string
 	CreatedAt   time.Time
 }
 
@@ -49,10 +49,10 @@ func (u *Users) Signup(ctx context.Context, username, email, name, password stri
 			INSERT INTO books (owner_user_id, slug, display_name, sort_order, is_system)
 			VALUES ($1, 'all', 'Default Contacts', 0, true)
 			RETURNING id, owner_user_id, slug, display_name, description, sort_order,
-			          is_active, is_system, created_at`,
+			          is_active, is_system, synced_tiers::text[], created_at`,
 			user.ID,
 		).Scan(&book.ID, &book.OwnerUserID, &book.Slug, &book.DisplayName, &book.Description,
-			&book.SortOrder, &book.IsActive, &book.IsSystem, &book.CreatedAt)
+			&book.SortOrder, &book.IsActive, &book.IsSystem, &book.SyncedTiers, &book.CreatedAt)
 		if err != nil {
 			return err
 		}
@@ -82,22 +82,15 @@ func mapSignupError(err error) error {
 	return err
 }
 
-func (b *Books) SystemBook(ctx context.Context, userID int64) (Book, error) {
-	row := b.pool.QueryRow(ctx, `
+// ActiveBooks lists the actor's active books within the current tx (the read
+// the resolver is built on, §6.1).
+func (s ScopedStore) ActiveBooks(ctx context.Context) ([]Book, error) {
+	rows, err := s.Tx.Query(ctx, `
 		SELECT id, owner_user_id, slug, display_name, description, sort_order,
-		       is_active, is_system, created_at
-		  FROM books
-		 WHERE owner_user_id = $1 AND is_system`, userID)
-	return scanBook(row)
-}
-
-func (b *Books) All(ctx context.Context, userID int64) ([]Book, error) {
-	rows, err := b.pool.Query(ctx, `
-		SELECT id, owner_user_id, slug, display_name, description, sort_order,
-		       is_active, is_system, created_at
+		       is_active, is_system, synced_tiers::text[], created_at
 		  FROM books
 		 WHERE owner_user_id = $1 AND is_active
-		 ORDER BY sort_order, slug`, userID)
+		 ORDER BY sort_order, slug`, s.Actor.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -117,17 +110,9 @@ func (b *Books) All(ctx context.Context, userID int64) ([]Book, error) {
 func scanBook(row pgx.Row) (Book, error) {
 	var b Book
 	err := row.Scan(&b.ID, &b.OwnerUserID, &b.Slug, &b.DisplayName, &b.Description,
-		&b.SortOrder, &b.IsActive, &b.IsSystem, &b.CreatedAt)
+		&b.SortOrder, &b.IsActive, &b.IsSystem, &b.SyncedTiers, &b.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Book{}, model.ErrNotFound
 	}
 	return b, err
-}
-
-type Books struct {
-	pool *pgxpool.Pool
-}
-
-func NewBooks(pool *pgxpool.Pool) *Books {
-	return &Books{pool: pool}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/emersion/go-webdav/carddav"
 
 	"example.com/segments/internal/model"
+	"example.com/segments/internal/resolve"
 	"example.com/segments/internal/store"
 )
 
@@ -36,6 +37,17 @@ func (b *backend) GetAddressObject(ctx context.Context, p string, _ *carddav.Add
 		c, err := s.LiveContactByFilename(ctx, objPath)
 		if err != nil {
 			return err
+		}
+		visible, err := resolve.Resolver{}.VisibleBooks(ctx, s)
+		if err != nil {
+			return err
+		}
+		bookIDs, err := s.ContactBookIDs(ctx, c.ID)
+		if err != nil {
+			return err
+		}
+		if !anyVisible(bookIDs, visible) { // invisible ≡ 404 (C2.4)
+			return model.ErrNotFound
 		}
 		card, err := vcard.NewDecoder(bytes.NewBufferString(c.VCardText)).Decode()
 		if err != nil {
@@ -72,7 +84,11 @@ func (b *backend) ListAddressObjects(ctx context.Context, p string, _ *carddav.A
 	}
 	objects := make([]carddav.AddressObject, 0)
 	err = store.WithTx(ctx, b.pool, a, func(s store.ScopedStore) error {
-		contacts, err := s.ListLiveContacts(ctx)
+		visible, err := resolve.Resolver{}.VisibleBooks(ctx, s)
+		if err != nil {
+			return err
+		}
+		contacts, err := s.ListContactsInBooks(ctx, visibleIDs(visible))
 		if err != nil {
 			return err
 		}
@@ -245,4 +261,23 @@ func buildSearchMeta(card vcard.Card) map[string]any {
 		meta["email"] = emails
 	}
 	return meta
+}
+
+func visibleIDs(visible map[int64]bool) []int64 {
+	ids := make([]int64, 0, len(visible))
+	for id, ok := range visible {
+		if ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func anyVisible(bookIDs []int64, visible map[int64]bool) bool {
+	for _, id := range bookIDs {
+		if visible[id] {
+			return true
+		}
+	}
+	return false
 }
