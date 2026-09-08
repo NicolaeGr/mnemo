@@ -9,6 +9,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
+	"example.com/segments/internal/api"
 	"example.com/segments/internal/auth"
 	"example.com/segments/internal/store"
 	"example.com/segments/internal/web/domain"
@@ -29,6 +30,7 @@ func New(d Deps) http.Handler {
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("assets"))))
 
 	r.Mount("/carddav", webdavsvc.New(store.NewUsers(d.Store.PG), d.Store.PG))
+	r.Mount("/api/v1", api.New(store.NewUsers(d.Store.PG), d.Store.PG))
 	r.Handle("/.well-known/carddav", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/carddav/", http.StatusFound)
 	}))
