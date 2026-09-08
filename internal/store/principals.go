@@ -237,6 +237,32 @@ func (s ScopedStore) SetPrincipalTier(ctx context.Context, principalID int64, ti
 	return s.bumpPrincipals(ctx, []int64{principalID})
 }
 
+// SetPrincipalLabel renames a device. Labels are device-invisible, so there is
+// no epoch bump and no lock needed.
+func (s ScopedStore) SetPrincipalLabel(ctx context.Context, principalID int64, label string) error {
+	if err := s.requirePrincipal(ctx, principalID); err != nil {
+		return err
+	}
+	_, err := s.Tx.Exec(ctx, `
+		UPDATE principals SET label = $3 WHERE id = $1 AND user_id = $2`,
+		principalID, s.Actor.UserID, label)
+	return err
+}
+
+// DeletePrincipal revokes a device credential: the principal row goes away and
+// its overrides cascade. A later request presenting that token no longer
+// resolves to an actor, so it gets a 401. Deleting touches no epochs, so no
+// lock is needed.
+func (s ScopedStore) DeletePrincipal(ctx context.Context, principalID int64) error {
+	if err := s.requirePrincipal(ctx, principalID); err != nil {
+		return err
+	}
+	_, err := s.Tx.Exec(ctx, `
+		DELETE FROM principals WHERE id = $1 AND user_id = $2`,
+		principalID, s.Actor.UserID)
+	return err
+}
+
 func (s ScopedStore) requirePrincipal(ctx context.Context, principalID int64) error {
 	var one int
 	err := s.Tx.QueryRow(ctx, `

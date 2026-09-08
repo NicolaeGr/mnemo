@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -89,6 +90,61 @@ func anyTrue(m map[int64]bool) bool {
 		}
 	}
 	return false
+}
+
+func TestPrincipalLifecycle(t *testing.T) {
+	pool := resetPool(t)
+	ctx := context.Background()
+
+	user, _, err := store.NewUsers(pool).Signup(ctx, "devuser", "dev@example.com", "Dev", "pw", 4)
+	if err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	work := insertBook(t, ctx, pool, user.ID, "work", "{secondary}")
+	principal := insertPrincipal(t, ctx, pool, user.ID, "secondary")
+	actor := model.Actor{UserID: user.ID, Username: "devuser"}
+
+	// Renaming a device needs no lock and no epoch bump.
+	if err := store.WithTx(ctx, pool, actor, func(s store.ScopedStore) error {
+		return s.SetPrincipalLabel(ctx, principal, "renamed phone")
+	}); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	var label string
+	if err := pool.QueryRow(ctx, `SELECT label FROM principals WHERE id = $1`, principal).Scan(&label); err != nil {
+		t.Fatalf("read label: %v", err)
+	}
+	if label != "renamed phone" {
+		t.Fatalf("label = %q, want renamed phone", label)
+	}
+
+	// Revoking a device drops it and its overrides together.
+	if err := setOverride(t, ctx, pool, user.ID, principal, work.ID, false); err != nil {
+		t.Fatalf("override: %v", err)
+	}
+	if err := store.WithTx(ctx, pool, actor, func(s store.ScopedStore) error {
+		return s.DeletePrincipal(ctx, principal)
+	}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	var pGone, oGone bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE id = $1)`, principal).Scan(&pGone); err != nil {
+		t.Fatalf("principal gone: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM principal_book_overrides WHERE principal_id = $1)`, principal).Scan(&oGone); err != nil {
+		t.Fatalf("override gone: %v", err)
+	}
+	if pGone || oGone {
+		t.Fatal("principal or its overrides survived deletion")
+	}
+
+	// Deleting an unknown device is a not-found.
+	if err := store.WithTx(ctx, pool, actor, func(s store.ScopedStore) error {
+		return s.DeletePrincipal(ctx, principal)
+	}); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("re-delete err = %v, want ErrNotFound", err)
+	}
 }
 
 func setOverride(t *testing.T, ctx context.Context, pool *pgxpool.Pool, userID, principalID, bookID int64, enabled bool) error {

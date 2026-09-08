@@ -38,6 +38,7 @@ func New(users *store.Users, pool *pgxpool.Pool) http.Handler {
 		r.Get("/", a.listPrincipals)
 		r.Post("/", a.createPrincipal)
 		r.Patch("/{id}", a.updatePrincipal)
+		r.Delete("/{id}", a.deletePrincipal)
 		r.Put("/{id}/overrides/{book}", a.setOverride)
 		r.Delete("/{id}/overrides/{book}", a.clearOverride)
 	})
@@ -520,11 +521,13 @@ func (a *api) listPrincipals(w http.ResponseWriter, r *http.Request) {
 }
 
 type principalPatch struct {
-	Tier *string `json:"tier"`
+	Tier  *string `json:"tier"`
+	Label *string `json:"label"`
 }
 
-// updatePrincipal changes a principal's tier; the epoch bump makes clients
-// resync, which is how a tier flip takes effect on the wire.
+// updatePrincipal edits a device's tier and/or label. A tier change flips what
+// a client syncs, so it takes the sync lock and bumps the principal's epoch; a
+// label is device-invisible and skips both.
 func (a *api) updatePrincipal(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(w, r)
 	if err != nil {
@@ -540,15 +543,45 @@ func (a *api) updatePrincipal(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	if body.Tier == nil {
+	if body.Tier == nil && body.Label == nil {
 		writeErr(w, model.ErrPrecondition)
 		return
 	}
 	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
-		if err := store.LockSync(r.Context(), s.Tx, actor.UserID); err != nil {
-			return err
+		if body.Tier != nil {
+			if err := store.LockSync(r.Context(), s.Tx, actor.UserID); err != nil {
+				return err
+			}
 		}
-		return s.SetPrincipalTier(r.Context(), id, *body.Tier)
+		if body.Label != nil {
+			if err := s.SetPrincipalLabel(r.Context(), id, *body.Label); err != nil {
+				return err
+			}
+		}
+		if body.Tier != nil {
+			if err := s.SetPrincipalTier(r.Context(), id, *body.Tier); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	writeErr(w, err)
+}
+
+// deletePrincipal revokes a device; its token stops resolving and its overrides
+// cascade. No epoch bump, so no lock.
+func (a *api) deletePrincipal(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(w, r)
+	if err != nil {
+		return
+	}
+	actor, err := a.actor(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
+		return s.DeletePrincipal(r.Context(), id)
 	})
 	writeErr(w, err)
 }

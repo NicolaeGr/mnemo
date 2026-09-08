@@ -39,6 +39,11 @@ func TestBookOps(t *testing.T) {
 		t.Fatalf("system delete err = %v, want ErrConflict", err)
 	}
 
+	// The system book is the I1 fallback and can't be hidden either.
+	if err := setBookActive(t, ctx, pool, user.ID, system.ID, false); !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("system deactivate err = %v, want ErrConflict", err)
+	}
+
 	// Deactivating and changing tiers flip what principals sync, so each bumps.
 	if err := setBookActive(t, ctx, pool, user.ID, work.ID, false); err != nil {
 		t.Fatalf("deactivate: %v", err)

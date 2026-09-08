@@ -128,10 +128,21 @@ func (s ScopedStore) CreateBook(ctx context.Context, slug, displayName string, d
 
 // SetBookActive activates/deactivates a book. Flipping is_active changes the
 // union every principal syncs, so it bumps them all; no-op if the value is
-// unchanged. Caller holds LockSync.
+// unchanged. The system book is every contact's I1 fallback, so hiding it would
+// strand contacts unrecoverably; deactivating it is a conflict. Caller holds
+// LockSync.
 func (s ScopedStore) SetBookActive(ctx context.Context, bookID int64, active bool) error {
-	if err := s.requireOwnedBook(ctx, bookID); err != nil {
+	var isSystem bool
+	if err := s.Tx.QueryRow(ctx, `
+		SELECT is_system FROM books WHERE owner_user_id = $1 AND id = $2`,
+		s.Actor.UserID, bookID).Scan(&isSystem); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return model.ErrNotFound
+		}
 		return err
+	}
+	if isSystem && !active {
+		return model.ErrConflict
 	}
 	tag, err := s.Tx.Exec(ctx, `
 		UPDATE books SET is_active = $3

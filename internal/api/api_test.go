@@ -108,6 +108,18 @@ func TestAPI(t *testing.T) {
 		t.Fatalf("bearer books = %d, want 200", resp.Code)
 	}
 
+	// A device can be renamed, and revoking it kills its token.
+	pid := strconv.FormatInt(tokenOut.ID, 10)
+	if resp := call(t, ts, "PATCH", base+"/principals/"+pid, "", `{"label":"phone-2"}`); resp.Code != http.StatusNoContent {
+		t.Fatalf("rename principal = %d, want 204", resp.Code)
+	}
+	if resp := call(t, ts, "DELETE", base+"/principals/"+pid, "", ""); resp.Code != http.StatusNoContent {
+		t.Fatalf("revoke principal = %d, want 204", resp.Code)
+	}
+	if resp := call(t, ts, "GET", base+"/books", "Bearer "+tokenOut.Token, ""); resp.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked token = %d, want 401", resp.Code)
+	}
+
 	// Wrong credentials are rejected.
 	req, err := http.NewRequest("GET", base+"/books", nil)
 	if err != nil {
