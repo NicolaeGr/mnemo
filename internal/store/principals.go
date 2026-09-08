@@ -54,8 +54,8 @@ func (p *PrincipalStore) IssueToken(ctx context.Context, userID int64, tier, lab
 	return pr, token, err
 }
 
-// ByTokenHash resolves a bearer credential to exactly one principal or none
-// (I7). A token that matches no principal returns model.ErrNotFound.
+// ByTokenHash resolves a bearer credential to exactly one principal or none.
+// Not found → model.ErrNotFound.
 func (p *PrincipalStore) ByTokenHash(ctx context.Context, tokenHash string) (Principal, error) {
 	var pr Principal
 	err := scanPrincipal(p.pool.QueryRow(ctx, `
@@ -63,6 +63,16 @@ func (p *PrincipalStore) ByTokenHash(ctx context.Context, tokenHash string) (Pri
 		  FROM principals
 		 WHERE token_hash = $1`, tokenHash), &pr)
 	return pr, err
+}
+
+// Touch updates last_synced_at at most once per five minutes per principal.
+// Diagnostic only; callers ignore the error.
+func (p *PrincipalStore) Touch(ctx context.Context, id int64) error {
+	_, err := p.pool.Exec(ctx, `
+		UPDATE principals SET last_synced_at = now()
+		 WHERE id = $1
+		   AND (last_synced_at IS NULL OR last_synced_at < now() - interval '5 minutes')`, id)
+	return err
 }
 
 func (p *PrincipalStore) ListForUser(ctx context.Context, userID int64) ([]Principal, error) {

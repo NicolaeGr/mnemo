@@ -11,7 +11,7 @@ import (
 )
 
 // New builds the CardDAV handler for the whole DAV plane. Identity is resolved
-// per request from the Basic credential (auth.RequireBasic); no userID is
+// per request from a Bearer principal token or a Basic credential; no userID is
 // injected at construction time.
 //
 // The go-webdav client PROPFINDs the server root ("/") for current-user-principal,
@@ -37,5 +37,5 @@ func New(users *store.Users, pool *pgxpool.Pool) http.Handler {
 	// Principal + home-set + address-book + objects.
 	mux.Handle(prefix+"/", &carddav.Handler{Backend: b, Prefix: prefix})
 
-	return auth.RequireBasic(users, mux)
+	return auth.RequireDAV(users, store.NewPrincipals(pool), mux)
 }
