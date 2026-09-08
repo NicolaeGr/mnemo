@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -76,6 +77,31 @@ func TestAPI(t *testing.T) {
 	}
 	if !tagged {
 		t.Fatal("contact was not tagged into the new book")
+	}
+
+	// Rename a book and reorder it.
+	if resp := call(t, ts, "PATCH", base+"/books/"+strconv.FormatInt(bookOut.ID, 10), "", `{"display_name":"Work Renamed"}`); resp.Code != http.StatusNoContent {
+		t.Fatalf("rename book = %d, want 204", resp.Code)
+	}
+	if resp := call(t, ts, "POST", base+"/books/reorder", "", `[`+strconv.FormatInt(bookOut.ID, 10)+`]`); resp.Code != http.StatusNoContent {
+		t.Fatalf("reorder = %d, want 204", resp.Code)
+	}
+
+	// Fetch and delete a contact by id.
+	get := call(t, ts, "GET", base+"/contacts/"+strconv.FormatInt(cid, 10), "", "")
+	if get.Code != http.StatusOK {
+		t.Fatalf("get contact = %d, want 200", get.Code)
+	}
+	var full struct {
+		ID        int64  `json:"id"`
+		VCardText string `json:"vcard_text"`
+	}
+	decode(t, get, &full)
+	if full.ID != cid || !strings.Contains(full.VCardText, "BEGIN:VCARD") {
+		t.Fatalf("get contact = %+v", full)
+	}
+	if resp := call(t, ts, "DELETE", base+"/contacts/"+strconv.FormatInt(cid, 10), "", ""); resp.Code != http.StatusNoContent {
+		t.Fatalf("delete contact = %d, want 204", resp.Code)
 	}
 
 	if resp := call(t, ts, "GET", base+"/books", "Bearer "+tokenOut.Token, ""); resp.Code != http.StatusOK {

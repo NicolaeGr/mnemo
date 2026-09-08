@@ -39,12 +39,15 @@ func New(users *store.Users, pool *pgxpool.Pool) http.Handler {
 	r.Route("/books", func(r chi.Router) {
 		r.Get("/", a.listBooks)
 		r.Post("/", a.createBook)
+		r.Post("/reorder", a.reorderBooks)
 		r.Patch("/{id}", a.updateBook)
 		r.Delete("/{id}", a.deleteBook)
 	})
 
 	r.Route("/contacts", func(r chi.Router) {
 		r.Get("/", a.searchContacts)
+		r.Get("/{id}", a.getContact)
+		r.Delete("/{id}", a.deleteContact)
 		r.Post("/{id}/tags", a.tagContact)
 	})
 
@@ -118,6 +121,7 @@ func (a *api) createBook(w http.ResponseWriter, r *http.Request) {
 type bookPatch struct {
 	Active      *bool    `json:"active"`
 	SyncedTiers []string `json:"synced_tiers"`
+	DisplayName *string  `json:"display_name"`
 }
 
 func (a *api) updateBook(w http.ResponseWriter, r *http.Request) {
@@ -145,9 +149,35 @@ func (a *api) updateBook(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if body.SyncedTiers != nil {
-			return s.SetBookTiers(r.Context(), id, body.SyncedTiers)
+			if err := s.SetBookTiers(r.Context(), id, body.SyncedTiers); err != nil {
+				return err
+			}
+		}
+		if body.DisplayName != nil {
+			if err := s.RenameBook(r.Context(), id, *body.DisplayName); err != nil {
+				return err
+			}
 		}
 		return nil
+	})
+	writeErr(w, err)
+}
+
+// reorderBooks applies a priority order (most important first) to the caller's
+// books by setting sort_order from position.
+func (a *api) reorderBooks(w http.ResponseWriter, r *http.Request) {
+	actor, err := a.actor(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var ids []int64
+	if err := decodeJSON(r, &ids); err != nil {
+		writeErr(w, err)
+		return
+	}
+	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
+		return s.ReorderBooks(r.Context(), ids)
 	})
 	writeErr(w, err)
 }
@@ -167,6 +197,62 @@ func (a *api) deleteBook(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return s.DeleteBook(r.Context(), id)
+	})
+	writeErr(w, err)
+}
+
+type fullContactOut struct {
+	ID        int64  `json:"id"`
+	UID       string `json:"uid"`
+	Filename  string `json:"filename"`
+	ETag      string `json:"etag"`
+	VCardText string `json:"vcard_text"`
+}
+
+// getContact returns one live contact including its raw vcard.
+func (a *api) getContact(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(w, r)
+	if err != nil {
+		return
+	}
+	actor, err := a.actor(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var out fullContactOut
+	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
+		c, err := s.LiveContactByID(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		out = fullContactOut{c.ID, c.UID, c.Filename, c.ETag, c.VCardText}
+		return nil
+	})
+	writeJSON(w, 200, out, err)
+}
+
+// deleteContact soft-deletes one live contact by id.
+func (a *api) deleteContact(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(w, r)
+	if err != nil {
+		return
+	}
+	actor, err := a.actor(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, actor.UserID); err != nil {
+			return err
+		}
+		c, err := s.LiveContactByID(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		_, err = s.DeleteContact(r.Context(), c.Filename)
+		return err
 	})
 	writeErr(w, err)
 }

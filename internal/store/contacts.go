@@ -112,8 +112,7 @@ func (s ScopedStore) ContactBookIDs(ctx context.Context, contactID int64) ([]int
 	return ids, rows.Err()
 }
 
-// LiveContactByFilename returns one live contact by filename, or ErrNotFound
-// on a miss.
+// LiveContactByFilename returns one live contact by filename; miss → ErrNotFound.
 func (s ScopedStore) LiveContactByFilename(ctx context.Context, filename string) (Contact, error) {
 	return scanContact(s.Tx.QueryRow(ctx, `
 		SELECT id, filename, vcard_text, uid, search_meta, etag,
@@ -121,6 +120,16 @@ func (s ScopedStore) LiveContactByFilename(ctx context.Context, filename string)
 		  FROM contacts
 		 WHERE user_id = $1 AND filename = $2 AND deleted_at IS NULL`,
 		s.Actor.UserID, filename))
+}
+
+// LiveContactByID returns one live contact by id; miss → ErrNotFound.
+func (s ScopedStore) LiveContactByID(ctx context.Context, id int64) (Contact, error) {
+	return scanContact(s.Tx.QueryRow(ctx, `
+		SELECT id, filename, vcard_text, uid, search_meta, etag,
+		       modified_by, deleted_at, created_at, updated_at
+		  FROM contacts
+		 WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+		id, s.Actor.UserID))
 }
 
 // PutContact handles preconditions, live-UID dedupe, default system-book

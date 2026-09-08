@@ -240,6 +240,33 @@ func (s ScopedStore) principalIDs(ctx context.Context) ([]int64, error) {
 	return ids, rows.Err()
 }
 
+// RenameBook updates a book's display name. Renames do not change what a
+// principal syncs, so there is no epoch bump.
+func (s ScopedStore) RenameBook(ctx context.Context, bookID int64, displayName string) error {
+	if err := s.requireOwnedBook(ctx, bookID); err != nil {
+		return err
+	}
+	_, err := s.Tx.Exec(ctx, `
+		UPDATE books SET display_name = $3
+		 WHERE owner_user_id = $1 AND id = $2`,
+		s.Actor.UserID, bookID, displayName)
+	return err
+}
+
+// ReorderBooks sets sort_order by position for the submitted ids. Ids not owned
+// by the actor are skipped. Device-invisible, so no epoch bump.
+func (s ScopedStore) ReorderBooks(ctx context.Context, ordered []int64) error {
+	for i, id := range ordered {
+		if _, err := s.Tx.Exec(ctx, `
+			UPDATE books SET sort_order = $1
+			 WHERE owner_user_id = $2 AND id = $3`,
+			i*100, s.Actor.UserID, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
