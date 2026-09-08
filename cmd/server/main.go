@@ -11,6 +11,7 @@ import (
 
 	"example.com/segments/internal/auth"
 	"example.com/segments/internal/config"
+	"example.com/segments/internal/jobs"
 	"example.com/segments/internal/store"
 	"example.com/segments/internal/web"
 	"example.com/segments/internal/web/seg"
@@ -44,6 +45,7 @@ func main() {
 	}
 
 	seg.DefaultCache = store.NewRedisCache(st.Redis)
+	go jobs.Run(ctx, st.PG)
 	sessions := auth.NewSessionManager(auth.SessionConfig{
 		Redis:    st.Redis,
 		Name:     cfg.SessionName,

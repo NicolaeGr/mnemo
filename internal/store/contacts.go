@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"example.com/segments/internal/model"
 )
@@ -290,6 +291,18 @@ func (s ScopedStore) DeleteContact(ctx context.Context, filename string) (bool, 
 		return false, err
 	}
 	return true, nil
+}
+
+// PurgeTombstones hard-deletes contacts tombstoned before the cutoff, in
+// batches of at most limit. Returns how many rows were deleted.
+func PurgeTombstones(ctx context.Context, pool *pgxpool.Pool, before time.Time, limit int) (int64, error) {
+	var n int64
+	err := WithTx(ctx, pool, model.Actor{}, func(s ScopedStore) error {
+		var err error
+		n, err = s.Prune(ctx, before, limit)
+		return err
+	})
+	return n, err
 }
 
 // Prune hard-deletes contacts tombstoned before the given cutoff.

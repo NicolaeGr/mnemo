@@ -43,6 +43,8 @@ func New(users *store.Users, pool *pgxpool.Pool) http.Handler {
 		r.Post("/{id}/tags", a.tagContact)
 	})
 
+	r.Post("/events/force-resync", a.forceResync)
+
 	return auth.RequireDAV(users, store.NewPrincipals(pool), r)
 }
 
@@ -278,6 +280,19 @@ func (a *api) actor(r *http.Request) (auth.Actor, error) {
 		return auth.Actor{}, http.ErrNoCookie
 	}
 	return actor, nil
+}
+
+// forceResync enqueues a resync of the caller's own principals; the dispatcher
+// bumps their epochs out of band.
+func (a *api) forceResync(w http.ResponseWriter, r *http.Request) {
+	actor, err := a.actor(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	initiated := actor.UserID
+	err = store.EnqueueEvent(r.Context(), a.pool, actor.UserID, "force_resync", map[string]any{}, &initiated)
+	writeErr(w, err)
 }
 
 func idParam(w http.ResponseWriter, r *http.Request) (int64, error) {

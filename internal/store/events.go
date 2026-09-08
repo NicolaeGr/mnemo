@@ -3,9 +3,12 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"example.com/segments/internal/model"
 )
 
 // Event is one user_events outbox row.
@@ -19,7 +22,7 @@ type Event struct {
 	DispatchedAt *time.Time
 }
 
-// EnqueueEvent inserts a pending event for a target user (Part-10 discipline).
+// EnqueueEvent inserts a pending event for a target user.
 func EnqueueEvent(ctx context.Context, pool *pgxpool.Pool, targetUserID int64, kind string, payload any, initiatedBy *int64) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -31,8 +34,7 @@ func EnqueueEvent(ctx context.Context, pool *pgxpool.Pool, targetUserID int64, k
 	return err
 }
 
-// ClaimEvents claims a batch of pending events for a target partition:
-// FOR UPDATE SKIP LOCKED in autocommit. Returns claimed rows.
+// ClaimEvents claims a batch of pending events: FOR UPDATE SKIP LOCKED.
 func ClaimEvents(ctx context.Context, pool *pgxpool.Pool, limit int) ([]Event, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT id, target_user_id, kind, payload, initiated_by, created_at, dispatched_at
@@ -58,11 +60,28 @@ func ClaimEvents(ctx context.Context, pool *pgxpool.Pool, limit int) ([]Event, e
 	return out, rows.Err()
 }
 
-// MarkEventDispatched stamps an event dispatched.
-func MarkEventDispatched(ctx context.Context, pool *pgxpool.Pool, id int64) error {
-	_, err := pool.Exec(ctx,
-		`UPDATE user_events SET dispatched_at = now() WHERE id = $1`, id)
-	return err
+// ApplyEvent runs one event's handler for its target user and marks it
+// dispatched in the same transaction. An error rolls back both, so the event
+// stays pending for the next poll.
+func ApplyEvent(ctx context.Context, pool *pgxpool.Pool, e Event) error {
+	actor := model.Actor{UserID: e.TargetUserID}
+	return WithTx(ctx, pool, actor, func(s ScopedStore) error {
+		if err := LockSync(ctx, s.Tx, e.TargetUserID); err != nil {
+			return err
+		}
+		switch e.Kind {
+		case "force_resync":
+			if err := s.bumpAllPrincipals(ctx); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("dispatch: unknown event kind %q", e.Kind)
+		}
+		_, err := s.Tx.Exec(ctx, `
+			UPDATE user_events SET dispatched_at = now()
+			 WHERE id = $1 AND dispatched_at IS NULL`, e.ID)
+		return err
+	})
 }
 
 // PendingEventCount reports outbox backlog depth (watchdog input).
