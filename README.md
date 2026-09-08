@@ -1,73 +1,79 @@
-# Segment
+# mnemo
 
-A Go + htmx starting template with real auth, persistence, and a **server-driven segment stack** — the browser already has most of the page, so each navigation only sends the part it doesn't. Layouts, their data, and the page title all fall out of _where a route lives_ instead of per-page code.
+A single-binary CardDAV contact server backed by Postgres. Each user has one
+virtual address book whose contents resolve per authenticating credential at
+request time, so contacts can be organised into tags (books) and different
+devices can be shown different slices without any of them knowing.
 
-Built with:
+## Running
 
-- **Go 1.26** + [chi](https://github.com/go-chi/chi) router
-- [templ](https://templ.guide) for type-safe, compiled HTML templates
-- [htmx](https://htmx.org) + a splash of [Alpine.js](https://alpinejs.dev) for client interactivity
-- **Postgres** via `pgx/v5` (users, migrations, seeds)
-- **Redis** via `go-redis/v9` (sessions + segment data cache)
-- [devenv](https://devenv.sh) for a reproducible dev environment
+The dev environment is devenv (Postgres + Redis).
 
-## What you get
+```sh
+devenv shell
+go run ./cmd/server
+```
 
-- **Cookie auth** — Redis-backed sessions with an HttpOnly cookie, `RequireAuth` middleware, login/logout, and bcrypt password checking. A seeded `test@domain.com` / `password` user.
-- **Postgres store** — versioned migrations (`schema_migrations`), a `users` table, and a `store.Users` repository.
-- **Segment stack** — every layout is a _segment_ (stable ID + outlet + optional data loader). The server renders only the segments the browser doesn't have mounted yet, per request.
-- **Cached segment data** — each segment's `Load` result is cached (in-memory by default, Redis in production via `seg.DefaultCache`), keyed per-session (`Scoped`) or global, with a `TTL`. Mutations invalidate via `seg.Invalidate` / `seg.InvalidateGlobal`.
-- **Page modals** — the same URL serves a full page _or_ a modal via the `X-Modal` header (`seg.Modalable`), with expand-to-page, close/back, and Escape support.
+On boot the server migrates the schema and, if empty, seeds an `admin` user
+(`admin@example.com` / `password`). It listens on `:8080`.
+
+## What it exposes
+
+- **CardDAV** at `/carddav/`:
+  - GET/PUT/DELETE of `text/vcard` address objects.
+  - REPORT `addressbook-query` / `addressbook-multiget`.
+  - REPORT `sync-collection` (RFC 6578) for incremental sync.
+  - address-book PROPFIND with `getctag` / `supported-report-set`.
+  - `.well-known/carddav` -> 301 `/carddav/`.
+- **REST** at `/api/v1` for managing the parts CardDAV can't:
+  - `POST /principals` mints a device token (returned once).
+  - `GET|POST /books`, `PATCH|DELETE /books/{id}`.
+  - `POST /contacts/{id}/tags` to attach/detach books.
+  - `GET /contacts?q=` to search by name or phone digits.
+  - `POST /events/force-resync`.
+
+Requests authenticate either with a device token
+(`Authorization: Bearer <token>`) or with Basic auth (the account password,
+which sees every book). A token's tier gates which books it can see; password
+auth is tier-all.
 
 ## Layout
 
 ```
-cmd/server/main.go        entrypoint: config, store, sessions, graceful shutdown
+cmd/server/            entrypoint: config, migrate, open pool, start workers
 internal/
-  auth/session.go         Redis-backed session manager + RequireAuth
-  config/config.go        env-driven configuration
-  store/                  Postgres pool, migrations, seed, users, Redis cache
-  web/
-    routes.go             wires segments onto chi routes (New(Deps))
-    seg/seg.go            the segment-stack "framework" (middleware + renderer)
-    domain/types.go       data returned by segment Load funcs
-    layouts/              templ layouts: root, marketing, auth, dashboard, settings, modal
-    pages/                templ pages: home, about, login, dashhome, settings, ...
+  auth/                bearer + basic resolution, actor in request context
+  model/               plain structs + error sentinels
+  store/               migrations (embed.FS) and scoped repositories
+  resolve/             which books a caller can see (tier + overrides)
+  api/                 /api/v1 handlers
+  jobs/                outbox dispatcher + tombstone purge loop
+  web/webdavsvc/       CardDAV over go-webdav, plus the sync/ctag shim
+  testdb/              per-package isolated Postgres databases for tests
 ```
 
-## Quick start
+One CardDAV request that mutates data is one transaction. Writes that touch the
+sync stream or a principal's epoch take a per-user advisory lock so change
+ordering stays consistent. Repository reads are woven with the acting user so
+no query crosses users.
 
-```bash
-# enter the devenv shell (Postgres + Redis are started and configured)
-devenv shell
+## Testing
 
-# run the server (migrates + seeds on boot, listens on :8080)
-go run ./cmd/server
+Tests that touch Postgres each use their own database and reset it before
+running, so `go test ./...` runs packages in parallel safely.
 
-# open the app
-#   http://localhost:8080
-#   test@domain.com / password
+```sh
+go test ./...
 ```
 
-> `devenv.yaml` / `devenv.nix` manage the whole toolchain (Go, templ, Tailwind, gopls) plus the Postgres and Redis services. `templ generate` regenerates the `*_templ.go` files after editing any `.templ` file.
+## Status
 
-## Configuration
+Working: schema + migrations, signup, contact CRUD with etags and a per-user
+change stream, soft delete with purge, tag attach/detach and book operations
+with epoch bumps, device tokens, minimal REST, sync-collection REPORT, and the
+getctag address-book property. CardDAV sync is verified against go-webdav's
+client; final confirmation against real iOS/Thunderbird clients is still
+pending, as is the exact `getctag` namespace each expects.
 
-All settings are env-driven (`internal/config/config.go`):
-
-| Env var           | Default          | Purpose                          |
-| ----------------- | ---------------- | -------------------------------- |
-| `ADDR`            | `:8080`          | listen address                   |
-| `DATABASE_URL`    | built from `PG*` | Postgres DSN (devenv sets `PG*`) |
-| `REDIS_ADDR`      | `127.0.0.1:6379` | Redis address                    |
-| `SESSION_NAME`    | `session`        | cookie name                      |
-| `SESSION_TTL`     | `720h`           | session lifetime                 |
-| `COOKIE_SECURE`   | `false`          | set `Secure` on the cookie       |
-| `COOKIE_SAMESITE` | `lax`            | `lax` / `strict` / `none`        |
-| `BCRYPT_COST`     | `10`             | password hash cost               |
-
-## Docs
-
-- **[docs/segments.md](docs/segments.md)** — the segment stack: why the page is a stack, why the URL decides everything, why data binds to mount, and why invalidation is explicit.
-- **[docs/htmx-oob.md](docs/htmx-oob.md)** — out-of-band swaps: why fragment navigation leaves holes, and when (and when not) to reach for OOB.
-- **[docs/adding-a-page.md](docs/adding-a-page.md)** — adding a page with the least code, and the thinking that makes it work.
+Not yet done: the web UI, full REST session/CSRF flow, and sharing (a later
+phase).

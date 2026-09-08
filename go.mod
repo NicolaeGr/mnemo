@@ -1,4 +1,4 @@
-module example.com/segments
+module github.com/nicolaegr/mnemo
 
 go 1.26.5
 

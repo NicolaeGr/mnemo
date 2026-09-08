@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/crypto/bcrypt"
 
-	"example.com/segments/internal/model"
+	"github.com/nicolaegr/mnemo/internal/model"
 )
 
 type Book struct {

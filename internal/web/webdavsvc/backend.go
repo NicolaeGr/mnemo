@@ -8,8 +8,8 @@ import (
 	"github.com/emersion/go-webdav"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"example.com/segments/internal/auth"
-	"example.com/segments/internal/store"
+	"github.com/nicolaegr/mnemo/internal/auth"
+	"github.com/nicolaegr/mnemo/internal/store"
 )
 
 const (

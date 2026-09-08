@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"example.com/segments/internal/model"
+	"github.com/nicolaegr/mnemo/internal/model"
 )
 
 // Retag applies add/remove of the actor's own book tags to a live contact.

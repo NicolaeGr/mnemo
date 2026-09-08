@@ -14,9 +14,9 @@ import (
 	"github.com/emersion/go-webdav"
 	"github.com/emersion/go-webdav/carddav"
 
-	"example.com/segments/internal/model"
-	"example.com/segments/internal/resolve"
-	"example.com/segments/internal/store"
+	"github.com/nicolaegr/mnemo/internal/model"
+	"github.com/nicolaegr/mnemo/internal/resolve"
+	"github.com/nicolaegr/mnemo/internal/store"
 )
 
 func (b *backend) GetAddressObject(ctx context.Context, p string, _ *carddav.AddressDataRequest) (*carddav.AddressObject, error) {

@@ -11,8 +11,8 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"strconv"
 
-	"example.com/segments/internal/web/domain"
-	"example.com/segments/internal/web/seg"
+	"github.com/nicolaegr/mnemo/internal/web/domain"
+	"github.com/nicolaegr/mnemo/internal/web/seg"
 )
 
 func DashboardSegment(child templ.Component) templ.Component {

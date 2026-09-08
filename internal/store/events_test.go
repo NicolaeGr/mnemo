@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/segments/internal/store"
+	"github.com/nicolaegr/mnemo/internal/store"
 )
 
 func TestForceResyncEvent(t *testing.T) {

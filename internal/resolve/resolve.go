@@ -6,7 +6,7 @@ package resolve
 import (
 	"context"
 
-	"example.com/segments/internal/store"
+	"github.com/nicolaegr/mnemo/internal/store"
 )
 
 // Resolver loads and answers visibility questions against a scoped store.

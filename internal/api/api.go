@@ -13,9 +13,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"example.com/segments/internal/auth"
-	"example.com/segments/internal/model"
-	"example.com/segments/internal/store"
+	"github.com/nicolaegr/mnemo/internal/auth"
+	"github.com/nicolaegr/mnemo/internal/model"
+	"github.com/nicolaegr/mnemo/internal/store"
 )
 
 type api struct {

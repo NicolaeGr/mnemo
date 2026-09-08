@@ -15,9 +15,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
-	"example.com/segments/internal/store"
-	"example.com/segments/internal/testdb"
-	"example.com/segments/internal/web/webdavsvc"
+	"github.com/nicolaegr/mnemo/internal/store"
+	"github.com/nicolaegr/mnemo/internal/testdb"
+	"github.com/nicolaegr/mnemo/internal/web/webdavsvc"
 )
 
 const (

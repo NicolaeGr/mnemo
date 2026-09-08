@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"example.com/segments/internal/model"
+	"github.com/nicolaegr/mnemo/internal/model"
 )
 
 // Event is one user_events outbox row.

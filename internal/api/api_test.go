@@ -11,9 +11,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"example.com/segments/internal/api"
-	"example.com/segments/internal/store"
-	"example.com/segments/internal/testdb"
+	"github.com/nicolaegr/mnemo/internal/api"
+	"github.com/nicolaegr/mnemo/internal/store"
+	"github.com/nicolaegr/mnemo/internal/testdb"
 )
 
 func TestAPI(t *testing.T) {

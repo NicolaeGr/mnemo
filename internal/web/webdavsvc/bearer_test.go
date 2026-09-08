@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"example.com/segments/internal/store"
-	"example.com/segments/internal/web/webdavsvc"
+	"github.com/nicolaegr/mnemo/internal/store"
+	"github.com/nicolaegr/mnemo/internal/web/webdavsvc"
 )
 
 func TestBearerPrincipalAuth(t *testing.T) {

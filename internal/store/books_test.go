@@ -7,8 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"example.com/segments/internal/model"
-	"example.com/segments/internal/store"
+	"github.com/nicolaegr/mnemo/internal/model"
+	"github.com/nicolaegr/mnemo/internal/store"
 )
 
 func TestBookOps(t *testing.T) {

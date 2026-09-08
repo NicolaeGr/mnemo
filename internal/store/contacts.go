@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"example.com/segments/internal/model"
+	"github.com/nicolaegr/mnemo/internal/model"
 )
 
 // Contact is one CardDAV address object row.

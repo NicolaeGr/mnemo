@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"example.com/segments/internal/model"
-	"example.com/segments/internal/store"
+	"github.com/nicolaegr/mnemo/internal/model"
+	"github.com/nicolaegr/mnemo/internal/store"
 )
 
 // Actor aliases model.Actor so auth's API keeps reading auth.Actor at call

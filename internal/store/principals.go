@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"example.com/segments/internal/model"
+	"github.com/nicolaegr/mnemo/internal/model"
 )
 
 // Principal is one row of principals: a device/app/credential.

@@ -3,7 +3,7 @@ package resolve
 import (
 	"testing"
 
-	"example.com/segments/internal/store"
+	"github.com/nicolaegr/mnemo/internal/store"
 )
 
 func b(id int64, tiers ...string) store.Book {

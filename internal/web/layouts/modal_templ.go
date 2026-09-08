@@ -8,7 +8,7 @@ package layouts
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import "example.com/segments/internal/web/seg"
+import "github.com/nicolaegr/mnemo/internal/web/seg"
 
 // ModalShell renders a page-modal shell inside #modal-root. current is the
 // URL the modal is open at; parent is the URL "back" should go to.

@@ -6,8 +6,8 @@ import (
 	"github.com/emersion/go-webdav/carddav"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"example.com/segments/internal/auth"
-	"example.com/segments/internal/store"
+	"github.com/nicolaegr/mnemo/internal/auth"
+	"github.com/nicolaegr/mnemo/internal/store"
 )
 
 // New builds the CardDAV handler for the whole DAV plane. Identity is resolved

@@ -6,7 +6,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"example.com/segments/internal/web/seg"
+	"github.com/nicolaegr/mnemo/internal/web/seg"
 )
 
 // RedisCache implements seg.Cache on Redis. It stores values as JSON with a

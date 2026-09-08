@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"net/http"
 
-	"example.com/segments/internal/web/seg"
+	"github.com/nicolaegr/mnemo/internal/web/seg"
 )
 
 func SettingsIndex() templ.Component {

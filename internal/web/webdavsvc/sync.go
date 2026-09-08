@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	"example.com/segments/internal/auth"
-	"example.com/segments/internal/resolve"
-	"example.com/segments/internal/store"
+	"github.com/nicolaegr/mnemo/internal/auth"
+	"github.com/nicolaegr/mnemo/internal/resolve"
+	"github.com/nicolaegr/mnemo/internal/store"
 )
 
 // The go-webdav carddav.Handler serves sync-collection only on its client, not
