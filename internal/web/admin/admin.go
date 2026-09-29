@@ -62,6 +62,7 @@ func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) ht
 	mux.Handle("GET /dashboard/contacts/search", a.requireSession(http.HandlerFunc(a.searchContacts)))
 	mux.Handle("POST /dashboard/contacts", a.mutate(http.HandlerFunc(a.createContact)))
 	mux.Handle("POST /dashboard/contacts/{id}/tags", a.mutate(http.HandlerFunc(a.setContactTags)))
+	mux.Handle("POST /dashboard/contacts/{id}/edit", a.mutate(http.HandlerFunc(a.updateContactFields)))
 	mux.Handle("POST /dashboard/contacts/{id}/delete", a.mutate(http.HandlerFunc(a.deleteContact)))
 	mux.Handle("GET /dashboard/settings", a.dashPage("Settings", a.settingsLeaf))
 	mux.Handle("POST /dashboard/settings", a.mutate(http.HandlerFunc(a.saveSettings)))
@@ -346,21 +347,26 @@ func (a *Admin) contactViews(r *http.Request, q string) ([]pages.ContactView, []
 			for _, id := range ids {
 				tagged[id] = true
 			}
-			views = append(views, pages.ContactView{Contact: c, Name: displayName(c), Books: tagged})
+			name, tel, email := cardFields(c)
+			views = append(views, pages.ContactView{Contact: c, Name: name, Tel: tel, Email: email, Books: tagged})
 		}
 		return nil
 	})
 	return views, active, err
 }
 
-// displayName reads FN from the stored vcard, falling back to the UID.
-func displayName(c store.Contact) string {
-	if card, err := vcard.NewDecoder(bytes.NewBufferString(c.VCardText)).Decode(); err == nil {
-		if fn := card.Value(vcard.FieldFormattedName); fn != "" {
-			return fn
-		}
+// cardFields reads the display fields the edit form prefills from the stored
+// vcard; the name falls back to the UID.
+func cardFields(c store.Contact) (name, tel, email string) {
+	card, err := vcard.NewDecoder(bytes.NewBufferString(c.VCardText)).Decode()
+	if err != nil {
+		return c.UID, "", ""
 	}
-	return c.UID
+	name = card.Value(vcard.FieldFormattedName)
+	if name == "" {
+		name = c.UID
+	}
+	return name, card.Value(vcard.FieldTelephone), card.Value(vcard.FieldEmail)
 }
 
 func (a *Admin) setContactTags(w http.ResponseWriter, r *http.Request) {
@@ -419,6 +425,57 @@ func (a *Admin) deleteContact(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	a.renderContactList(w, r, "", err)
+}
+
+// updateContactFields merges the edited name/phone/email into the stored card,
+// so fields the form doesn't show survive.
+func (a *Admin) updateContactFields(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	tel := strings.TrimSpace(r.FormValue("tel"))
+	email := strings.TrimSpace(r.FormValue("email"))
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
+			return err
+		}
+		c, err := s.LiveContactByID(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		card, err := vcard.NewDecoder(strings.NewReader(c.VCardText)).Decode()
+		if err != nil {
+			return err
+		}
+		if name != "" {
+			card.SetValue(vcard.FieldFormattedName, name)
+		}
+		setOrClear(card, vcard.FieldTelephone, tel)
+		setOrClear(card, vcard.FieldEmail, email)
+		vcardmeta.EnsureFormattedName(card)
+		meta, err := json.Marshal(vcardmeta.SearchMeta(card))
+		if err != nil {
+			return err
+		}
+		_, err = s.PutContact(r.Context(), store.PutContactParams{
+			Filename:   c.Filename,
+			UID:        vcardmeta.DeriveUID(card, c.Filename),
+			VCardText:  vcardmeta.CanonicalText(card),
+			SearchMeta: meta,
+		}, store.Precondition{})
+		return err
+	})
+	a.renderContactList(w, r, "", err)
+}
+
+func setOrClear(card vcard.Card, field, value string) {
+	if value == "" {
+		delete(card, field)
+		return
+	}
+	card.SetValue(field, value)
 }
 
 func (a *Admin) renderContactList(w http.ResponseWriter, r *http.Request, _ string, cause error) {

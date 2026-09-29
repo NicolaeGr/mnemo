@@ -284,6 +284,45 @@ func TestAdminSettingsAndContactCreate(t *testing.T) {
 	}
 }
 
+func TestAdminContactEdit(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	users := store.NewUsers(pool)
+	user, system, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
+	if err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
+	h := admin.New(users, pool, mgr)
+	cookie, csrf := login(t, h, mgr, "admin", "secret")
+
+	var cid int64
+	card := "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:urn:uuid:edit\r\nFN:Alice\r\nORG:Acme\r\nEND:VCARD\r\n"
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO contacts (user_id, filename, uid, vcard_text, search_meta, etag)
+		VALUES ($1, 'alice.vcf', 'urn:uuid:edit', $2, '{}', 'e') RETURNING id`, user.ID, card).Scan(&cid); err != nil {
+		t.Fatalf("insert contact: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)`, cid, system.ID); err != nil {
+		t.Fatalf("tag system: %v", err)
+	}
+
+	rec := do(h, "POST", "/dashboard/contacts/"+strconv.FormatInt(cid, 10)+"/edit",
+		url.Values{"csrf": {csrf}, "name": {"Alice B"}, "tel": {"+15550111"}, "email": {"a@b.c"}}, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("edit = %d, want 200", rec.Code)
+	}
+	var text string
+	if err := pool.QueryRow(ctx, `SELECT vcard_text FROM contacts WHERE id = $1`, cid).Scan(&text); err != nil {
+		t.Fatalf("read vcard: %v", err)
+	}
+	for _, want := range []string{"FN:Alice B", "ORG:Acme", "a@b.c", "+15550111"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("edited vcard missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func login(t *testing.T, h http.Handler, mgr *websession.Manager, user, pass string) (*http.Cookie, string) {
 	t.Helper()
 	rec := do(h, "POST", "/login", url.Values{"username": {user}, "password": {pass}}, nil)

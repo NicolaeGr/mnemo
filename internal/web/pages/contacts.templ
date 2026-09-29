@@ -11,6 +11,8 @@ import (
 type ContactView struct {
 	Contact store.Contact
 	Name    string
+	Tel     string
+	Email   string
 	Books   map[int64]bool
 }
 
@@ -39,16 +41,16 @@ templ ContactsPage(contacts []ContactView, books []store.Book, q, errMsg string)
 		>
 			<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
 			<div class="space-y-1.5">
-				<label class="text-xs font-medium text-muted-foreground" for="name">Name</label>
-				<input id="name" name="name" required placeholder="Alice Example" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
+				<label class="text-xs font-medium text-muted-foreground" for="new-name">Name</label>
+				<input id="new-name" name="name" required placeholder="Alice Example" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
 			</div>
 			<div class="space-y-1.5">
-				<label class="text-xs font-medium text-muted-foreground" for="tel">Phone</label>
-				<input id="tel" name="tel" placeholder="+1 555 0100" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
+				<label class="text-xs font-medium text-muted-foreground" for="new-tel">Phone</label>
+				<input id="new-tel" name="tel" placeholder="+1 555 0100" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
 			</div>
 			<div class="space-y-1.5">
-				<label class="text-xs font-medium text-muted-foreground" for="email">Email</label>
-				<input id="email" name="email" type="email" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
+				<label class="text-xs font-medium text-muted-foreground" for="new-email">Email</label>
+				<input id="new-email" name="email" type="email" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
 			</div>
 			<button type="submit" class="btn btn-secondary bg-accent text-accent-foreground px-3 py-2 text-sm">Add contact</button>
 		</form>
@@ -93,12 +95,36 @@ templ ContactCard(c ContactView, books []store.Book) {
 				</label>
 			}
 			<button type="submit" class="btn btn-secondary px-3 py-1.5 text-xs">Save tags</button>
-			<button
-				type="submit"
-				class="btn btn-secondary px-3 py-1.5 text-xs text-red-600"
-				hx-post={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/delete" }
-				hx-confirm="Delete this contact? It is soft-deleted and purged after two days."
-			>Delete</button>
 		</form>
+		<details class="mt-3">
+			<summary class="cursor-pointer text-xs font-medium text-muted-foreground">Edit fields</summary>
+			<form
+				hx-post={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/edit" }
+				hx-target="#contacts-list"
+				hx-swap="outerHTML"
+				class="mt-3 flex flex-wrap items-end gap-3"
+			>
+				<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+				<div class="space-y-1.5">
+					<label class="text-xs font-medium text-muted-foreground">Name</label>
+					<input name="name" value={ c.Name } class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
+				</div>
+				<div class="space-y-1.5">
+					<label class="text-xs font-medium text-muted-foreground">Phone</label>
+					<input name="tel" value={ c.Tel } class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
+				</div>
+				<div class="space-y-1.5">
+					<label class="text-xs font-medium text-muted-foreground">Email</label>
+					<input name="email" value={ c.Email } class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
+				</div>
+				<button type="submit" class="btn btn-secondary px-3 py-2 text-sm">Save</button>
+				<button
+					type="submit"
+					class="btn btn-secondary px-3 py-2 text-sm text-red-600"
+					hx-post={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/delete" }
+					hx-confirm="Delete this contact? It is soft-deleted and purged after two days."
+				>Delete</button>
+			</form>
+		</details>
 	</div>
 }

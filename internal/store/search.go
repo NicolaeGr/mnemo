@@ -39,7 +39,7 @@ func (s ScopedStore) Search(ctx context.Context, p SearchParams) (ContactSearch,
 		args = append(args, v)
 		return len(args)
 	}
-	conds = append(conds, fmt.Sprintf("c.user_id = $1 AND c.deleted_at IS NULL"))
+	conds = append(conds, "c.user_id = $1 AND c.deleted_at IS NULL")
 	if p.BookID != nil {
 		conds = append(conds, fmt.Sprintf(
 			"c.id IN (SELECT contact_id FROM contact_books WHERE book_id = $%d)", arg(*p.BookID)))
