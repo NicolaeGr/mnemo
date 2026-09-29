@@ -31,6 +31,27 @@ templ ContactsPage(contacts []ContactView, books []store.Book, q, errMsg string)
 			hx-trigger="keyup changed delay:300ms, search"
 			class="w-full max-w-sm rounded-md border border-input bg-background px-3 py-2 text-sm"
 		/>
+		<form
+			hx-post="/dashboard/contacts"
+			hx-target="#contacts-list"
+			hx-swap="outerHTML"
+			class="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-background p-4"
+		>
+			<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+			<div class="space-y-1.5">
+				<label class="text-xs font-medium text-muted-foreground" for="name">Name</label>
+				<input id="name" name="name" required placeholder="Alice Example" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
+			</div>
+			<div class="space-y-1.5">
+				<label class="text-xs font-medium text-muted-foreground" for="tel">Phone</label>
+				<input id="tel" name="tel" placeholder="+1 555 0100" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
+			</div>
+			<div class="space-y-1.5">
+				<label class="text-xs font-medium text-muted-foreground" for="email">Email</label>
+				<input id="email" name="email" type="email" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
+			</div>
+			<button type="submit" class="btn btn-secondary bg-accent text-accent-foreground px-3 py-2 text-sm">Add contact</button>
+		</form>
 		@ContactList(contacts, books, errMsg)
 	</div>
 }

@@ -7,8 +7,12 @@ package admin
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/a-h/templ"
 	"github.com/emersion/go-vcard"
@@ -16,6 +20,7 @@ import (
 
 	"github.com/nicolaegr/mnemo/internal/model"
 	"github.com/nicolaegr/mnemo/internal/store"
+	vcardmeta "github.com/nicolaegr/mnemo/internal/vcard"
 	"github.com/nicolaegr/mnemo/internal/web/domain"
 	"github.com/nicolaegr/mnemo/internal/web/layouts"
 	"github.com/nicolaegr/mnemo/internal/web/pages"
@@ -55,9 +60,11 @@ func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) ht
 	mux.Handle("POST /dashboard/devices/{id}/delete", a.mutate(http.HandlerFunc(a.deleteDevice)))
 	mux.Handle("GET /dashboard/contacts", a.dashPage("Contacts", a.contactsLeaf))
 	mux.Handle("GET /dashboard/contacts/search", a.requireSession(http.HandlerFunc(a.searchContacts)))
+	mux.Handle("POST /dashboard/contacts", a.mutate(http.HandlerFunc(a.createContact)))
 	mux.Handle("POST /dashboard/contacts/{id}/tags", a.mutate(http.HandlerFunc(a.setContactTags)))
 	mux.Handle("POST /dashboard/contacts/{id}/delete", a.mutate(http.HandlerFunc(a.deleteContact)))
 	mux.Handle("GET /dashboard/settings", a.dashPage("Settings", a.settingsLeaf))
+	mux.Handle("POST /dashboard/settings", a.mutate(http.HandlerFunc(a.saveSettings)))
 
 	return mux
 }
@@ -144,7 +151,48 @@ func (a *Admin) overviewLeaf(r *http.Request) templ.Component {
 }
 
 func (a *Admin) settingsLeaf(r *http.Request) templ.Component {
-	return pages.SettingsIndex(uictx.From(r.Context()))
+	s := uictx.From(r.Context())
+	books, defaultID, err := a.settingsData(r)
+	if err != nil {
+		return pages.SettingsPage(s, nil, nil, err.Error())
+	}
+	return pages.SettingsPage(s, books, defaultID, "")
+}
+
+func (a *Admin) settingsData(r *http.Request) ([]store.Book, *int64, error) {
+	var books []store.Book
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		var e error
+		books, e = s.ListBooks(r.Context())
+		return e
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	def, err := a.users.DefaultBook(r.Context(), a.actor(r).UserID)
+	return books, def, err
+}
+
+func (a *Admin) saveSettings(w http.ResponseWriter, r *http.Request) {
+	var cause error
+	if raw := r.FormValue("default_book_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			cause = model.ErrPrecondition
+		} else {
+			cause = a.users.SetDefaultBook(r.Context(), a.actor(r).UserID, id)
+		}
+	}
+	books, def, err := a.settingsData(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	msg := ""
+	if cause != nil {
+		msg = cause.Error()
+	}
+	renderTempl(w, r, pages.SettingsPanel(books, def, msg))
 }
 
 func (a *Admin) booksLeaf(r *http.Request) templ.Component {
@@ -384,6 +432,58 @@ func (a *Admin) renderContactList(w http.ResponseWriter, r *http.Request, _ stri
 		return
 	}
 	renderTempl(w, r, pages.ContactList(views, books, msg))
+}
+
+// createContact builds a card from the form fields and stores it under a
+// server-generated filename, into the system book by default.
+func (a *Admin) createContact(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.FormValue("name"))
+	tel := strings.TrimSpace(r.FormValue("tel"))
+	email := strings.TrimSpace(r.FormValue("email"))
+	var cause error
+	if name == "" {
+		cause = model.ErrPrecondition
+	} else {
+		cause = a.storeNewContact(r, name, tel, email)
+	}
+	a.renderContactList(w, r, "", cause)
+}
+
+func (a *Admin) storeNewContact(r *http.Request, name, tel, email string) error {
+	card := vcard.Card{}
+	card.SetValue(vcard.FieldVersion, "3.0")
+	card.SetValue(vcard.FieldFormattedName, name)
+	if tel != "" {
+		card.SetValue(vcard.FieldTelephone, tel)
+	}
+	if email != "" {
+		card.SetValue(vcard.FieldEmail, email)
+	}
+	vcardmeta.EnsureFormattedName(card)
+	text := vcardmeta.CanonicalText(card)
+	meta, err := json.Marshal(vcardmeta.SearchMeta(card))
+	if err != nil {
+		return err
+	}
+	filename := newFilename()
+	uid := vcardmeta.DeriveUID(card, filename)
+	return store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
+			return err
+		}
+		_, err := s.PutContact(r.Context(), store.PutContactParams{
+			Filename: filename, UID: uid, VCardText: text, SearchMeta: meta,
+		}, store.Precondition{})
+		return err
+	})
+}
+
+func newFilename() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b) + ".vcf"
 }
 
 func (a *Admin) devicesLeaf(r *http.Request) templ.Component {

@@ -1,8 +1,13 @@
 package pages
 
-import "github.com/nicolaegr/mnemo/internal/web/uictx"
+import (
+	"strconv"
 
-templ SettingsIndex(s uictx.Session) {
+	"github.com/nicolaegr/mnemo/internal/store"
+	"github.com/nicolaegr/mnemo/internal/web/uictx"
+)
+
+templ SettingsPage(s uictx.Session, books []store.Book, defaultID *int64, errMsg string) {
 	<div class="mx-auto max-w-2xl space-y-8">
 		<div>
 			<h1 class="text-2xl font-bold tracking-tight">Settings</h1>
@@ -13,6 +18,7 @@ templ SettingsIndex(s uictx.Session) {
 			@SettingRow("Name", s.Name)
 			@SettingRow("Email", s.Email)
 		</div>
+		@SettingsPanel(books, defaultID, errMsg)
 	</div>
 }
 
@@ -20,5 +26,32 @@ templ SettingRow(label, value string) {
 	<div class="flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-5 py-4">
 		<p class="text-sm font-medium">{ label }</p>
 		<p class="text-sm text-muted-foreground">{ value }</p>
+	</div>
+}
+
+templ SettingsPanel(books []store.Book, defaultID *int64, errMsg string) {
+	<div id="settings-panel" class="space-y-3">
+		if errMsg != "" {
+			<p class="rounded-md border border-red-600/40 bg-red-600/10 px-3 py-2 text-sm text-red-600">{ errMsg }</p>
+		}
+		<form
+			hx-post="/dashboard/settings"
+			hx-target="#settings-panel"
+			hx-swap="outerHTML"
+			class="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-background p-4"
+		>
+			<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+			<div class="space-y-1.5">
+				<label class="text-xs font-medium text-muted-foreground" for="default_book_id">Default book</label>
+				<select id="default_book_id" name="default_book_id" class="rounded-md border border-input bg-background px-3 py-2 text-sm">
+					for _, b := range books {
+						if b.IsActive {
+							<option value={ strconv.FormatInt(b.ID, 10) } selected?={ defaultID != nil && *defaultID == b.ID }>{ b.DisplayName }</option>
+						}
+					}
+				</select>
+			</div>
+			<button type="submit" class="btn btn-secondary px-3 py-2 text-sm">Save</button>
+		</form>
 	</div>
 }

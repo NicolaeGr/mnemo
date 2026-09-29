@@ -238,6 +238,52 @@ func TestAdminContacts(t *testing.T) {
 	}
 }
 
+func TestAdminSettingsAndContactCreate(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	users := store.NewUsers(pool)
+	if _, _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4); err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
+	h := admin.New(users, pool, mgr)
+	cookie, csrf := login(t, h, mgr, "admin", "secret")
+
+	// Point the default book at a freshly created one.
+	rec := do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}}, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create book = %d", rec.Code)
+	}
+	var bookID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM books WHERE slug = 'work'`).Scan(&bookID); err != nil {
+		t.Fatalf("read book: %v", err)
+	}
+	rec = do(h, "POST", "/dashboard/settings",
+		url.Values{"csrf": {csrf}, "default_book_id": {strconv.FormatInt(bookID, 10)}}, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save settings = %d, want 200", rec.Code)
+	}
+	var def *int64
+	if err := pool.QueryRow(ctx, `
+		SELECT default_book_id FROM user_settings s JOIN users u ON u.id = s.user_id
+		 WHERE u.username = 'admin'`).Scan(&def); err != nil || def == nil || *def != bookID {
+		t.Fatalf("default book = %v, want %d (err=%v)", def, bookID, err)
+	}
+
+	// Create a contact from the form.
+	rec = do(h, "POST", "/dashboard/contacts",
+		url.Values{"csrf": {csrf}, "name": {"Alice Example"}, "tel": {"+15550100"}, "email": {"alice@example.com"}}, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Alice Example") {
+		t.Fatalf("create contact = %d, body missing name", rec.Code)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM contacts c JOIN users u ON u.id = c.user_id
+		 WHERE u.username = 'admin' AND c.deleted_at IS NULL`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("contact count = %d (err=%v), want 1", count, err)
+	}
+}
+
 func login(t *testing.T, h http.Handler, mgr *websession.Manager, user, pass string) (*http.Cookie, string) {
 	t.Helper()
 	rec := do(h, "POST", "/login", url.Values{"username": {user}, "password": {pass}}, nil)

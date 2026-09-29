@@ -73,6 +73,17 @@ func (u *Users) SetDefaultBook(ctx context.Context, userID, bookID int64) error 
 	return err
 }
 
+// DefaultBook returns the user's default book id, or nil when unset.
+func (u *Users) DefaultBook(ctx context.Context, userID int64) (*int64, error) {
+	var id *int64
+	err := u.pool.QueryRow(ctx,
+		`SELECT default_book_id FROM user_settings WHERE user_id = $1`, userID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return id, err
+}
+
 func CheckPassword(user User, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) == nil
 }
