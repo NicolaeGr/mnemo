@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/nicolaegr/mnemo/internal/model"
 	"github.com/nicolaegr/mnemo/internal/store"
@@ -28,17 +29,29 @@ func ActorFrom(ctx context.Context) (Actor, bool) {
 
 // RequireDAV authenticates a request as either a device principal (Bearer) or
 // an account (Basic). A bearer resolves to exactly one principal, whose tier
-// gates visibility. Basic has no principal, so it is the tier-all view.
+// gates visibility. Basic has no principal, so it is the tier-all view. Auth
+// failures are throttled per client IP to slow credential guessing.
 func RequireDAV(users *store.Users, principals *store.PrincipalStore, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := clientIP(r)
+		now := time.Now()
+		if !authFailures.allowed(ip, now) {
+			tooManyRequests(w)
+			return
+		}
 		actor, ok := resolve(r, users, principals)
 		if !ok {
+			authFailures.fail(ip, now)
 			unauthorized(w)
 			return
 		}
+		authFailures.clear(ip)
 		next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
 	})
 }
+
+// authFailures caps auth-failure bursts per IP (10/min).
+var authFailures = newFailLimiter(10, time.Minute)
 
 func resolve(r *http.Request, users *store.Users, principals *store.PrincipalStore) (Actor, bool) {
 	authz := r.Header.Get("Authorization")
