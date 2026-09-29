@@ -93,11 +93,21 @@ func mapSignupError(err error) error {
 // ActiveBooks lists the actor's active books within the current tx (the read
 // the resolver is built on).
 func (s ScopedStore) ActiveBooks(ctx context.Context) ([]Book, error) {
+	return s.queryBooks(ctx, `WHERE owner_user_id = $1 AND is_active`)
+}
+
+// ListBooks lists all of the actor's books, active or not, for management views
+// that must be able to reactivate a hidden book.
+func (s ScopedStore) ListBooks(ctx context.Context) ([]Book, error) {
+	return s.queryBooks(ctx, `WHERE owner_user_id = $1`)
+}
+
+func (s ScopedStore) queryBooks(ctx context.Context, where string) ([]Book, error) {
 	rows, err := s.Tx.Query(ctx, `
 		SELECT id, owner_user_id, slug, display_name, description, sort_order,
 		       is_active, is_system, synced_tiers::text[], created_at
 		  FROM books
-		 WHERE owner_user_id = $1 AND is_active
+		 `+where+`
 		 ORDER BY sort_order, slug`, s.Actor.UserID)
 	if err != nil {
 		return nil, err

@@ -7,10 +7,12 @@ package admin
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"github.com/a-h/templ"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nicolaegr/mnemo/internal/model"
 	"github.com/nicolaegr/mnemo/internal/store"
 	"github.com/nicolaegr/mnemo/internal/web/domain"
 	"github.com/nicolaegr/mnemo/internal/web/layouts"
@@ -34,9 +36,15 @@ func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) ht
 
 	mux.Handle("GET /login", a.authStack(http.HandlerFunc(a.loginPage)))
 	mux.Handle("POST /login", http.HandlerFunc(a.loginSubmit))
-	mux.Handle("POST /logout", a.requireCSRF(http.HandlerFunc(a.logout)))
+	mux.Handle("POST /logout", a.mutate(http.HandlerFunc(a.logout)))
 
 	mux.Handle("GET /dashboard", a.dashPage("Overview", a.overviewLeaf))
+	mux.Handle("GET /dashboard/books", a.dashPage("Books", a.booksLeaf))
+	mux.Handle("POST /dashboard/books", a.mutate(http.HandlerFunc(a.createBook)))
+	mux.Handle("POST /dashboard/books/{id}/rename", a.mutate(http.HandlerFunc(a.renameBook)))
+	mux.Handle("POST /dashboard/books/{id}/active", a.mutate(http.HandlerFunc(a.setBookActive)))
+	mux.Handle("POST /dashboard/books/{id}/tiers", a.mutate(http.HandlerFunc(a.setBookTiers)))
+	mux.Handle("POST /dashboard/books/{id}/delete", a.mutate(http.HandlerFunc(a.deleteBook)))
 	mux.Handle("GET /dashboard/settings", a.dashPage("Settings", a.settingsLeaf))
 
 	return mux
@@ -127,6 +135,133 @@ func (a *Admin) settingsLeaf(r *http.Request) templ.Component {
 	return pages.SettingsIndex(uictx.From(r.Context()))
 }
 
+func (a *Admin) booksLeaf(r *http.Request) templ.Component {
+	books, err := a.listBooks(r)
+	if err != nil {
+		return pages.BookList(nil, err.Error())
+	}
+	return pages.BookList(books, "")
+}
+
+func (a *Admin) listBooks(r *http.Request) ([]store.Book, error) {
+	var books []store.Book
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		var e error
+		books, e = s.ListBooks(r.Context())
+		return e
+	})
+	return books, err
+}
+
+func (a *Admin) createBook(w http.ResponseWriter, r *http.Request) {
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
+			return err
+		}
+		_, err := s.CreateBook(r.Context(), r.FormValue("slug"), r.FormValue("display_name"), nil, 100)
+		return err
+	})
+	a.renderBookList(w, r, err)
+}
+
+func (a *Admin) renameBook(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	desc := r.FormValue("description")
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
+			return err
+		}
+		if err := s.RenameBook(r.Context(), id, r.FormValue("display_name")); err != nil {
+			return err
+		}
+		return s.SetBookDescription(r.Context(), id, &desc)
+	})
+	a.renderBookList(w, r, err)
+}
+
+func (a *Admin) setBookActive(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	active := r.FormValue("active") == "true"
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
+			return err
+		}
+		return s.SetBookActive(r.Context(), id, active)
+	})
+	a.renderBookList(w, r, err)
+}
+
+func (a *Admin) setBookTiers(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	tiers := r.Form["tiers"]
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
+			return err
+		}
+		return s.SetBookTiers(r.Context(), id, tiers)
+	})
+	a.renderBookList(w, r, err)
+}
+
+func (a *Admin) deleteBook(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
+			return err
+		}
+		return s.DeleteBook(r.Context(), id)
+	})
+	a.renderBookList(w, r, err)
+}
+
+// renderBookList re-renders the list fragment after a mutation; the caller's
+// htmx attributes target #books-list, so errors surface in the same place.
+func (a *Admin) renderBookList(w http.ResponseWriter, r *http.Request, cause error) {
+	msg := ""
+	if cause != nil {
+		msg = cause.Error()
+	}
+	books, err := a.listBooks(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	renderTempl(w, r, pages.BookList(books, msg))
+}
+
+func (a *Admin) actor(r *http.Request) model.Actor {
+	s := uictx.From(r.Context())
+	return model.Actor{UserID: s.UserID, Username: s.Username}
+}
+
+func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return 0, false
+	}
+	return id, true
+}
+
+func renderTempl(w http.ResponseWriter, r *http.Request, comp templ.Component) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := comp.Render(r.Context(), w); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 // requireSession loads the session, resolves the account, and puts both into
 // the request context for templates. Missing or stale sessions go to /login.
 func (a *Admin) requireSession(next http.Handler) http.Handler {
@@ -148,9 +283,10 @@ func (a *Admin) requireSession(next http.Handler) http.Handler {
 	})
 }
 
-// requireCSRF guards cookie-authenticated mutations.
-func (a *Admin) requireCSRF(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// mutate guarantees a session and a matching CSRF token before the handler
+// runs, for cookie-authenticated state changes.
+func (a *Admin) mutate(next http.Handler) http.Handler {
+	return a.requireSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := a.session.Read(r)
 		if !ok {
 			a.toLogin(w, r)
@@ -161,7 +297,7 @@ func (a *Admin) requireCSRF(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
-	})
+	}))
 }
 
 func (a *Admin) toLogin(w http.ResponseWriter, r *http.Request) {

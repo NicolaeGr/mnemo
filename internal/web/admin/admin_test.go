@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -68,6 +69,67 @@ func TestAdminLoginAndSession(t *testing.T) {
 	if rec := do(h, "POST", "/logout", url.Values{"csrf": {csrf}}, cookie); rec.Code != http.StatusSeeOther {
 		t.Fatalf("logout = %d, want 303", rec.Code)
 	}
+}
+
+func TestAdminBooks(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	users := store.NewUsers(pool)
+	_, system, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
+	if err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
+	h := admin.New(users, pool, mgr)
+	cookie, csrf := login(t, h, mgr, "admin", "secret")
+
+	rec := do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}}, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Work") {
+		t.Fatalf("create book = %d, body missing Work: %s", rec.Code, rec.Body.String())
+	}
+	var workID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM books WHERE slug = 'work'`).Scan(&workID); err != nil {
+		t.Fatalf("read created book: %v", err)
+	}
+
+	// Deactivate the new book; the list must show it as inactive.
+	rec = do(h, "POST", "/dashboard/books/"+strconv.FormatInt(workID, 10)+"/active",
+		url.Values{"csrf": {csrf}, "active": {"false"}}, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "inactive") {
+		t.Fatalf("deactivate = %d, body missing inactive: %s", rec.Code, rec.Body.String())
+	}
+
+	// The system book can't be hidden; the conflict surfaces in the list.
+	rec = do(h, "POST", "/dashboard/books/"+strconv.FormatInt(system.ID, 10)+"/active",
+		url.Values{"csrf": {csrf}, "active": {"false"}}, cookie)
+	if !strings.Contains(rec.Body.String(), "conflict") {
+		t.Fatalf("system deactivate body missing conflict: %s", rec.Body.String())
+	}
+
+	rec = do(h, "POST", "/dashboard/books/"+strconv.FormatInt(workID, 10)+"/delete",
+		url.Values{"csrf": {csrf}}, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete = %d, want 200", rec.Code)
+	}
+	var gone bool
+	if err := pool.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM books WHERE id = $1)`, workID).Scan(&gone); err != nil || !gone {
+		t.Fatalf("book not deleted (gone=%v err=%v)", gone, err)
+	}
+
+	// A mutation without the CSRF token is refused.
+	if rec := do(h, "POST", "/dashboard/books", url.Values{"slug": {"x"}, "display_name": {"X"}}, cookie); rec.Code != http.StatusForbidden {
+		t.Fatalf("create without csrf = %d, want 403", rec.Code)
+	}
+}
+
+func login(t *testing.T, h http.Handler, mgr *websession.Manager, user, pass string) (*http.Cookie, string) {
+	t.Helper()
+	rec := do(h, "POST", "/login", url.Values{"username": {user}, "password": {pass}}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login = %d, want 200", rec.Code)
+	}
+	cookie := sessionCookie(t, rec)
+	return cookie, csrfFor(t, mgr, cookie)
 }
 
 func do(h http.Handler, method, path string, form url.Values, cookie *http.Cookie) *httptest.ResponseRecorder {
