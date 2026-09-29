@@ -13,6 +13,7 @@ type Config struct {
 
 	SessionName    string
 	SessionTTL     time.Duration
+	SessionSecret  string
 	CookieSecure   bool
 	CookieSameSite string
 
@@ -25,20 +26,19 @@ func Load() Config {
 		DatabaseURL:    databaseURL(),
 		RedisAddr:      getenv("REDIS_ADDR", "127.0.0.1:6379"),
 		SessionName:    getenv("SESSION_NAME", "session"),
-		SessionTTL:     30 * 24 * time.Hour,
+		SessionTTL:     72 * time.Hour,
+		SessionSecret:  os.Getenv("SESSION_SECRET"),
 		CookieSecure:   getenv("COOKIE_SECURE", "false") == "true",
 		CookieSameSite: getenv("COOKIE_SAMESITE", "lax"),
 		BcryptCost:     10,
 	}
 }
 
-// databaseURL builds a keyword/value DSN from PG* env vars (devenv sets them)
-// so a unix socket directory path needs no escaping.
 func databaseURL() string {
 	if v := os.Getenv("DATABASE_URL"); v != "" {
 		return v
 	}
-	host := getenv("PGHOST", "/run/user/1000/devenv-386ec41/postgres")
+	host := getenv("PGHOST", "localhost")
 	port := getenv("PGPORT", "5432")
 	user := getenv("PGUSER", os.Getenv("USER"))
 	db := getenv("PGDATABASE", os.Getenv("USER"))

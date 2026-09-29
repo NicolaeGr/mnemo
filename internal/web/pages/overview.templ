@@ -1,0 +1,24 @@
+package pages
+
+import "strconv"
+
+templ Overview(books, devices, contacts int) {
+	<div class="space-y-8">
+		<div>
+			<h1 class="text-2xl font-bold tracking-tight">Overview</h1>
+			<p class="mt-1 text-sm text-muted-foreground">Your address books, devices, and contacts.</p>
+		</div>
+		<div class="grid gap-4 md:grid-cols-3">
+			@StatCard("Books", strconv.Itoa(books))
+			@StatCard("Devices", strconv.Itoa(devices))
+			@StatCard("Contacts", strconv.Itoa(contacts))
+		</div>
+	</div>
+}
+
+templ StatCard(label, value string) {
+	<div class="rounded-lg border border-border bg-background p-5">
+		<p class="text-sm text-muted-foreground">{ label }</p>
+		<p class="mt-2 text-2xl font-semibold tracking-tight">{ value }</p>
+	</div>
+}

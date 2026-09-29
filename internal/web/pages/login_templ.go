@@ -29,7 +29,7 @@ func Login() templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"rounded-xl border border-border bg-background p-8 shadow-lg\"><div class=\"text-center\"><span class=\"mx-auto grid h-10 w-10 place-items-center rounded-lg bg-accent text-accent-foreground font-semibold\">S</span><h1 class=\"mt-4 text-xl font-semibold tracking-tight\">Welcome back</h1><p class=\"mt-1 text-sm text-muted-foreground\">Sign in to continue.</p></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"rounded-xl border border-border bg-background p-8 shadow-lg\"><div class=\"text-center\"><span class=\"mx-auto grid h-10 w-10 place-items-center rounded-lg bg-accent text-accent-foreground font-semibold\">M</span><h1 class=\"mt-4 text-xl font-semibold tracking-tight\">Sign in</h1><p class=\"mt-1 text-sm text-muted-foreground\">Manage your contacts and devices.</p></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -37,7 +37,7 @@ func Login() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<p class=\"mt-6 text-center text-sm text-muted-foreground\">No account? <a href=\"/about\" hx-get=\"/about\" hx-push-url=\"true\" class=\"font-medium text-foreground hover:underline\">Learn about segments</a></p></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -45,8 +45,8 @@ func Login() templ.Component {
 	})
 }
 
-// LoginForm posts via fetch (Alpine) so auth errors render inline without a
-// full page redraw and without losing the entered fields.
+// LoginForm posts via fetch so auth errors render inline without a full redraw
+// and without losing the entered fields.
 func LoginForm() templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -68,7 +68,7 @@ func LoginForm() templ.Component {
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<form class=\"mt-6 space-y-4\" x-data=\"{ email: '', password: '', error: '', loading: false }\" @submit.prevent=\"\n\t\t\tloading = true; error = '';\n\t\t\tfetch('/login', {\n\t\t\t\tmethod: 'POST',\n\t\t\t\theaders: { 'Content-Type': 'application/x-www-form-urlencoded' },\n\t\t\t\tbody: 'email=' + encodeURIComponent(email) + '&password=' + encodeURIComponent(password)\n\t\t\t}).then(async r => {\n\t\t\t\tif (r.ok) { window.location.href = '/dashboard'; return; }\n\t\t\t\terror = (await r.text()) || 'Invalid email or password';\n\t\t\t\tloading = false;\n\t\t\t}).catch(() => { error = 'Network error'; loading = false; });\n\t\t\"><div class=\"space-y-1.5\"><label for=\"email\" class=\"text-sm font-medium\">Email</label> <input id=\"email\" name=\"email\" type=\"email\" required x-model=\"email\" placeholder=\"you@example.com\" class=\"w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring focus:border-transparent\"></div><div class=\"space-y-1.5\"><div class=\"flex items-center justify-between\"><label for=\"password\" class=\"text-sm font-medium\">Password</label> <a href=\"/about\" hx-get=\"/about\" hx-push-url=\"true\" class=\"text-xs text-muted-foreground hover:text-foreground\">Forgot password?</a></div><input id=\"password\" name=\"password\" type=\"password\" required x-model=\"password\" class=\"w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring focus:border-transparent\"></div><button type=\"submit\" :disabled=\"loading\" class=\"btn btn-secondary w-full bg-accent text-accent-foreground hover:opacity-90\"><span x-show=\"!loading\">Sign in</span> <span x-show=\"loading\" x-cloak>Signing in...</span></button><p x-show=\"error\" x-text=\"error\" class=\"text-sm text-red-600\" x-cloak></p></form>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<form class=\"mt-6 space-y-4\" x-data=\"{ username: '', password: '', error: '', loading: false }\" @submit.prevent=\"\n\t\t\tloading = true; error = '';\n\t\t\tfetch('/login', {\n\t\t\t\tmethod: 'POST',\n\t\t\t\theaders: { 'Content-Type': 'application/x-www-form-urlencoded' },\n\t\t\t\tbody: 'username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password)\n\t\t\t}).then(async r => {\n\t\t\t\tif (r.ok) { window.location.href = '/dashboard'; return; }\n\t\t\t\terror = (await r.text()) || 'Invalid username or password';\n\t\t\t\tloading = false;\n\t\t\t}).catch(() => { error = 'Network error'; loading = false; });\n\t\t\"><div class=\"space-y-1.5\"><label for=\"username\" class=\"text-sm font-medium\">Username or email</label> <input id=\"username\" name=\"username\" type=\"text\" required x-model=\"username\" placeholder=\"you or you@example.com\" class=\"w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring focus:border-transparent\"></div><div class=\"space-y-1.5\"><label for=\"password\" class=\"text-sm font-medium\">Password</label> <input id=\"password\" name=\"password\" type=\"password\" required x-model=\"password\" class=\"w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring focus:border-transparent\"></div><button type=\"submit\" :disabled=\"loading\" class=\"btn btn-secondary w-full bg-accent text-accent-foreground hover:opacity-90\"><span x-show=\"!loading\">Sign in</span> <span x-show=\"loading\" x-cloak>Signing in...</span></button><p x-show=\"error\" x-text=\"error\" class=\"text-sm text-red-600\" x-cloak></p></form>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

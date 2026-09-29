@@ -1,84 +1,24 @@
 package pages
 
-import (
-	"net/http"
+import "github.com/nicolaegr/mnemo/internal/web/uictx"
 
-	"example.com/segments/internal/web/seg"
-)
-
-templ SettingsIndex() {
+templ SettingsIndex(s uictx.Session) {
 	<div class="mx-auto max-w-2xl space-y-8">
 		<div>
 			<h1 class="text-2xl font-bold tracking-tight">Settings</h1>
-			<p class="mt-1 text-sm text-muted-foreground">Manage your account.</p>
+			<p class="mt-1 text-sm text-muted-foreground">Your account.</p>
 		</div>
-		<div class="space-y-6">
-			@SettingRow("Profile", "Display name, email and avatar.", "Edit")
-			@SettingRow("Security", "Password and two-factor authentication.", "Edit")
-			@SettingRow("Billing", "Plan, invoices and payment method.", "Edit")
+		<div class="space-y-3">
+			@SettingRow("Username", s.Username)
+			@SettingRow("Name", s.Name)
+			@SettingRow("Email", s.Email)
 		</div>
 	</div>
 }
 
-templ NotifToggle(title, desc string, checked ...bool) {
-	<div class="flex items-center justify-between gap-4 px-5 py-4">
-		<div>
-			<p class="text-sm font-medium">{ title }</p>
-			<p class="mt-0.5 text-sm text-muted-foreground">{ desc }</p>
-		</div>
-		<button
-			type="button"
-			role="switch"
-			aria-checked={ notifChecked(checked) }
-			class={ "relative h-6 w-11 shrink-0 rounded-full transition-colors", notifSwitchClass(checked) }
-		>
-			<span class={ "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-background shadow transition-transform", notifThumbClass(checked) }></span>
-		</button>
-	</div>
-}
-
-func notifChecked(checked []bool) string {
-	if len(checked) > 0 && checked[0] {
-		return "true"
-	}
-	return "false"
-}
-
-func notifSwitchClass(checked []bool) string {
-	if len(checked) > 0 && checked[0] {
-		return "bg-foreground"
-	}
-	return "bg-muted"
-}
-
-func notifThumbClass(checked []bool) string {
-	if len(checked) > 0 && checked[0] {
-		return "translate-x-5"
-	}
-	return ""
-}
-
-templ SettingRow(title, desc, action string) {
+templ SettingRow(label, value string) {
 	<div class="flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-5 py-4">
-		<div>
-			<p class="text-sm font-medium">{ title }</p>
-			<p class="mt-0.5 text-sm text-muted-foreground">{ desc }</p>
-		</div>
-		<span class="shrink-0 btn btn-ghost border border-border px-3 py-1.5 text-xs">{ action }</span>
+		<p class="text-sm font-medium">{ label }</p>
+		<p class="text-sm text-muted-foreground">{ value }</p>
 	</div>
 }
-
-func settingsTitle(r *http.Request) string {
-	return "Settings"
-}
-
-func settingsLeaf(r *http.Request) (string, templ.Component) {
-	return settingsTitle(r), SettingsIndex()
-}
-
-func settingsModalOpts() seg.ModalOpts {
-	return seg.ModalOpts{CloseX: true, Esc: true, Backdrop: true, Expand: true, Size: "lg"}
-}
-
-var SettingsLeaf = settingsLeaf
-var SettingsModalOpts = settingsModalOpts

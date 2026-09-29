@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/nicolaegr/mnemo/internal/jobs"
 	"github.com/nicolaegr/mnemo/internal/store"
 	"github.com/nicolaegr/mnemo/internal/web"
+	"github.com/nicolaegr/mnemo/internal/websession"
 )
 
 func main() {
@@ -46,7 +48,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           web.New(web.Deps{Store: st}),
+		Handler:           web.New(web.Deps{Store: st, Session: sessionManager(cfg)}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -62,5 +64,30 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
+	}
+}
+
+// sessionManager signs UI session cookies. Without SESSION_SECRET it falls back
+// to an ephemeral key, so dev works but sessions reset on restart.
+func sessionManager(cfg config.Config) *websession.Manager {
+	secret := []byte(cfg.SessionSecret)
+	if len(secret) == 0 {
+		secret = make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			log.Fatalf("session secret: %v", err)
+		}
+		log.Printf("SESSION_SECRET unset; using an ephemeral key (sessions reset on restart)")
+	}
+	return websession.New(cfg.SessionName, secret, cfg.SessionTTL, cfg.CookieSecure, sameSite(cfg.CookieSameSite))
+}
+
+func sameSite(v string) http.SameSite {
+	switch v {
+	case "strict":
+		return http.SameSiteStrictMode
+	case "none":
+		return http.SameSiteNoneMode
+	default:
+		return http.SameSiteLaxMode
 	}
 }
