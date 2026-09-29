@@ -223,6 +223,30 @@ func (s ScopedStore) ClearPrincipalOverride(ctx context.Context, principalID, bo
 	return s.bumpPrincipals(ctx, []int64{principalID})
 }
 
+// ListPrincipalOverrides returns one of the actor's principals' explicit
+// per-book overrides as bookID -> enabled. Absent books have no override.
+func (s ScopedStore) ListPrincipalOverrides(ctx context.Context, principalID int64) (map[int64]bool, error) {
+	if err := s.requirePrincipal(ctx, principalID); err != nil {
+		return nil, err
+	}
+	rows, err := s.Tx.Query(ctx, `
+		SELECT book_id, enabled FROM principal_book_overrides WHERE principal_id = $1`, principalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int64]bool)
+	for rows.Next() {
+		var bookID int64
+		var enabled bool
+		if err := rows.Scan(&bookID, &enabled); err != nil {
+			return nil, err
+		}
+		out[bookID] = enabled
+	}
+	return out, rows.Err()
+}
+
 // SetPrincipalTier changes a principal's tier, which flips which books it can
 // see, so it bumps that principal's epoch. Caller holds LockSync.
 func (s ScopedStore) SetPrincipalTier(ctx context.Context, principalID int64, tier string) error {

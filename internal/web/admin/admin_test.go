@@ -122,6 +122,64 @@ func TestAdminBooks(t *testing.T) {
 	}
 }
 
+func TestAdminDevices(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	users := store.NewUsers(pool)
+	if _, _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4); err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
+	h := admin.New(users, pool, mgr)
+	cookie, csrf := login(t, h, mgr, "admin", "secret")
+
+	rec := do(h, "POST", "/dashboard/devices", url.Values{"csrf": {csrf}, "label": {"phone"}, "tier": {"primary"}}, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "New device token") {
+		t.Fatalf("create device = %d, body missing token banner", rec.Code)
+	}
+	var pid int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM principals WHERE label = 'phone'`).Scan(&pid); err != nil {
+		t.Fatalf("read device: %v", err)
+	}
+
+	rec = do(h, "POST", "/dashboard/devices/"+strconv.FormatInt(pid, 10)+"/tier",
+		url.Values{"csrf": {csrf}, "tier": {"secondary"}}, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "secondary") {
+		t.Fatalf("set tier = %d, body missing secondary", rec.Code)
+	}
+
+	rec = do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}}, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create book = %d", rec.Code)
+	}
+	var bookID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM books WHERE slug = 'work'`).Scan(&bookID); err != nil {
+		t.Fatalf("read book: %v", err)
+	}
+
+	rec = do(h, "POST", "/dashboard/devices/"+strconv.FormatInt(pid, 10)+"/overrides",
+		url.Values{"csrf": {csrf}, "hide": {strconv.FormatInt(bookID, 10)}}, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save overrides = %d", rec.Code)
+	}
+	var hidden bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM principal_book_overrides
+		               WHERE principal_id = $1 AND book_id = $2 AND enabled = false)`, pid, bookID).Scan(&hidden); err != nil || !hidden {
+		t.Fatalf("override not recorded (hidden=%v err=%v)", hidden, err)
+	}
+
+	rec = do(h, "POST", "/dashboard/devices/"+strconv.FormatInt(pid, 10)+"/delete",
+		url.Values{"csrf": {csrf}}, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("revoke = %d, want 200", rec.Code)
+	}
+	var gone bool
+	if err := pool.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM principals WHERE id = $1)`, pid).Scan(&gone); err != nil || !gone {
+		t.Fatalf("device not revoked (gone=%v err=%v)", gone, err)
+	}
+}
+
 func login(t *testing.T, h http.Handler, mgr *websession.Manager, user, pass string) (*http.Cookie, string) {
 	t.Helper()
 	rec := do(h, "POST", "/login", url.Values{"username": {user}, "password": {pass}}, nil)

@@ -45,6 +45,12 @@ func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) ht
 	mux.Handle("POST /dashboard/books/{id}/active", a.mutate(http.HandlerFunc(a.setBookActive)))
 	mux.Handle("POST /dashboard/books/{id}/tiers", a.mutate(http.HandlerFunc(a.setBookTiers)))
 	mux.Handle("POST /dashboard/books/{id}/delete", a.mutate(http.HandlerFunc(a.deleteBook)))
+	mux.Handle("GET /dashboard/devices", a.dashPage("Devices", a.devicesLeaf))
+	mux.Handle("POST /dashboard/devices", a.mutate(http.HandlerFunc(a.createDevice)))
+	mux.Handle("POST /dashboard/devices/{id}/rename", a.mutate(http.HandlerFunc(a.renameDevice)))
+	mux.Handle("POST /dashboard/devices/{id}/tier", a.mutate(http.HandlerFunc(a.setDeviceTier)))
+	mux.Handle("POST /dashboard/devices/{id}/overrides", a.mutate(http.HandlerFunc(a.setDeviceOverrides)))
+	mux.Handle("POST /dashboard/devices/{id}/delete", a.mutate(http.HandlerFunc(a.deleteDevice)))
 	mux.Handle("GET /dashboard/settings", a.dashPage("Settings", a.settingsLeaf))
 
 	return mux
@@ -244,6 +250,150 @@ func (a *Admin) renderBookList(w http.ResponseWriter, r *http.Request, cause err
 func (a *Admin) actor(r *http.Request) model.Actor {
 	s := uictx.From(r.Context())
 	return model.Actor{UserID: s.UserID, Username: s.Username}
+}
+
+func (a *Admin) devicesLeaf(r *http.Request) templ.Component {
+	views, books, err := a.deviceViews(r)
+	if err != nil {
+		return pages.DeviceList(nil, nil, "", err.Error())
+	}
+	return pages.DeviceList(views, books, "", "")
+}
+
+func (a *Admin) deviceViews(r *http.Request) ([]pages.DeviceView, []store.Book, error) {
+	actor := a.actor(r)
+	principals, err := store.NewPrincipals(a.pool).ListForUser(r.Context(), actor.UserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var books []store.Book
+	overrides := make(map[int64]map[int64]bool, len(principals))
+	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
+		if books, err = s.ListBooks(r.Context()); err != nil {
+			return err
+		}
+		for _, p := range principals {
+			ov, err := s.ListPrincipalOverrides(r.Context(), p.ID)
+			if err != nil {
+				return err
+			}
+			overrides[p.ID] = ov
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	views := make([]pages.DeviceView, len(principals))
+	for i, p := range principals {
+		views[i] = pages.DeviceView{Principal: p, Overrides: overrides[p.ID]}
+	}
+	return views, books, nil
+}
+
+func (a *Admin) createDevice(w http.ResponseWriter, r *http.Request) {
+	_, token, err := store.NewPrincipals(a.pool).IssueToken(r.Context(), a.actor(r).UserID,
+		r.FormValue("tier"), r.FormValue("label"))
+	a.renderDeviceList(w, r, token, err)
+}
+
+func (a *Admin) renameDevice(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		return s.SetPrincipalLabel(r.Context(), id, r.FormValue("label"))
+	})
+	a.renderDeviceList(w, r, "", err)
+}
+
+func (a *Admin) setDeviceTier(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
+			return err
+		}
+		return s.SetPrincipalTier(r.Context(), id, r.FormValue("tier"))
+	})
+	a.renderDeviceList(w, r, "", err)
+}
+
+func (a *Admin) deleteDevice(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		return s.DeletePrincipal(r.Context(), id)
+	})
+	a.renderDeviceList(w, r, "", err)
+}
+
+// setDeviceOverrides reconciles a device's per-book opt-outs from the "hide"
+// checkboxes, only writing rows that actually change so epochs don't bump on a
+// no-op save.
+func (a *Admin) setDeviceOverrides(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	hidden := make(map[int64]bool)
+	for _, v := range r.Form["hide"] {
+		if bookID, err := strconv.ParseInt(v, 10, 64); err == nil {
+			hidden[bookID] = true
+		}
+	}
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
+			return err
+		}
+		current, err := s.ListPrincipalOverrides(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		books, err := s.ListBooks(r.Context())
+		if err != nil {
+			return err
+		}
+		for _, b := range books {
+			if !b.IsActive {
+				continue
+			}
+			cur, has := current[b.ID]
+			want := !hidden[b.ID]
+			switch {
+			case !has && want, has && cur == want:
+				// Nothing to change.
+			case !has, has && !want:
+				if err := s.SetPrincipalOverride(r.Context(), id, b.ID, false); err != nil {
+					return err
+				}
+			default:
+				if err := s.ClearPrincipalOverride(r.Context(), id, b.ID); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	a.renderDeviceList(w, r, "", err)
+}
+
+func (a *Admin) renderDeviceList(w http.ResponseWriter, r *http.Request, newToken string, cause error) {
+	msg := ""
+	if cause != nil {
+		msg = cause.Error()
+	}
+	views, books, err := a.deviceViews(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	renderTempl(w, r, pages.DeviceList(views, books, newToken, msg))
 }
 
 func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {

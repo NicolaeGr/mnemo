@@ -83,7 +83,7 @@ templ BookCard(b store.Book) {
 				<span class="text-xs font-medium text-muted-foreground">Tiers</span>
 				for _, tier := range allTiers {
 					<label class="flex items-center gap-1.5 text-sm">
-						<input type="checkbox" name="tiers" value={ tier } checked={ hasTier(b.SyncedTiers, tier) }/>
+						<input type="checkbox" name="tiers" value={ tier } checked?={ hasTier(b.SyncedTiers, tier) }/>
 						{ tier }
 					</label>
 				}
