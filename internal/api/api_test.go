@@ -247,6 +247,9 @@ func TestAccountEndpoints(t *testing.T) {
 	if dup := anonRequest(t, ts, "POST", base+"/users", `{"username":"newbie","email":"newbie@example.com","name":"New","password":"secret"}`); dup.Code != http.StatusConflict {
 		t.Fatalf("duplicate signup = %d, want 409", dup.Code)
 	}
+	if bad := anonRequest(t, ts, "POST", base+"/users", `{"username":"Bad_User","email":"bad@example.com","name":"Bad","password":"secret"}`); bad.Code != http.StatusBadRequest {
+		t.Fatalf("bad-username signup = %d, want 400", bad.Code)
+	}
 
 	req, _ := http.NewRequest("GET", base+"/me", nil)
 	req.SetBasicAuth("newbie", "secret")
@@ -254,6 +257,95 @@ func TestAccountEndpoints(t *testing.T) {
 	ts.Config.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("newbie /me = %d, want 200", rec.Code)
+	}
+}
+
+func TestBookDescriptionAndSearchFilter(t *testing.T) {
+	pool := resetPool(t)
+	ctx := context.Background()
+	users := store.NewUsers(pool)
+	if _, _, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4); err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	ts := httptest.NewServer(api.New(users, pool))
+	defer ts.Close()
+	base := ts.URL
+
+	mkBook := func(slug, name string) int64 {
+		t.Helper()
+		resp := call(t, ts, "POST", base+"/books", "", `{"slug":"`+slug+`","display_name":"`+name+`"}`)
+		if resp.Code != http.StatusCreated {
+			t.Fatalf("create book %s = %d: %s", slug, resp.Code, resp.Body.String())
+		}
+		var out struct {
+			ID int64 `json:"id"`
+		}
+		decode(t, resp, &out)
+		return out.ID
+	}
+	alpha := mkBook("alpha", "Alpha")
+	beta := mkBook("beta", "Beta")
+
+	if resp := call(t, ts, "PATCH", base+"/books/"+strconv.FormatInt(alpha, 10), "", `{"description":"alpha desc"}`); resp.Code != http.StatusNoContent {
+		t.Fatalf("patch description = %d, want 204: %s", resp.Code, resp.Body.String())
+	}
+	listed := call(t, ts, "GET", base+"/books", "", "")
+	var books []struct {
+		ID          int64   `json:"id"`
+		Description *string `json:"description"`
+	}
+	decode(t, listed, &books)
+	var gotDesc *string
+	for _, b := range books {
+		if b.ID == alpha {
+			gotDesc = b.Description
+		}
+	}
+	if gotDesc == nil || *gotDesc != "alpha desc" {
+		t.Fatalf("alpha description = %v, want alpha desc", gotDesc)
+	}
+
+	mkContact := func(fn string, book int64) int64 {
+		t.Helper()
+		var id int64
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO contacts (user_id, filename, uid, vcard_text, search_meta, etag)
+			VALUES ((SELECT id FROM users WHERE username = 'apiuser'), $1, $1, 'BEGIN:VCARD\r\nEND:VCARD', '{}', 'e')
+			RETURNING id`, fn+".vcf").Scan(&id); err != nil {
+			t.Fatalf("insert contact: %v", err)
+		}
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)`, id, book); err != nil {
+			t.Fatalf("tag: %v", err)
+		}
+		return id
+	}
+	ca := mkContact("a", alpha)
+	cb := mkContact("b", beta)
+
+	search := func(book int64) []int64 {
+		t.Helper()
+		resp := call(t, ts, "GET", base+"/contacts?book="+strconv.FormatInt(book, 10), "", "")
+		if resp.Code != http.StatusOK {
+			t.Fatalf("search book=%d = %d: %s", book, resp.Code, resp.Body.String())
+		}
+		var out struct {
+			Contacts []struct {
+				ID int64 `json:"id"`
+			} `json:"contacts"`
+		}
+		decode(t, resp, &out)
+		ids := make([]int64, 0, len(out.Contacts))
+		for _, c := range out.Contacts {
+			ids = append(ids, c.ID)
+		}
+		return ids
+	}
+	if ids := search(alpha); len(ids) != 1 || ids[0] != ca {
+		t.Fatalf("search alpha = %v, want [%d]", ids, ca)
+	}
+	if ids := search(beta); len(ids) != 1 || ids[0] != cb {
+		t.Fatalf("search beta = %v, want [%d]", ids, cb)
 	}
 }
 

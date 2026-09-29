@@ -71,13 +71,21 @@ func mapSignupError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" {
+	pgErr, ok := err.(*pgconn.PgError)
+	if !ok {
+		return err
+	}
+	switch pgErr.Code {
+	case "23505":
 		switch pgErr.ConstraintName {
 		case "users_username_key":
 			return model.ErrUsernameTaken
 		case "users_email_key":
 			return model.ErrEmailTaken
 		}
+	case "23514":
+		// A check-constraint failure is bad input, not a server fault.
+		return model.ErrPrecondition
 	}
 	return err
 }
@@ -261,6 +269,19 @@ func (s ScopedStore) RenameBook(ctx context.Context, bookID int64, displayName s
 		UPDATE books SET display_name = $3
 		 WHERE owner_user_id = $1 AND id = $2`,
 		s.Actor.UserID, bookID, displayName)
+	return err
+}
+
+// SetBookDescription updates a book's description. Device-invisible, so no epoch
+// bump.
+func (s ScopedStore) SetBookDescription(ctx context.Context, bookID int64, description *string) error {
+	if err := s.requireOwnedBook(ctx, bookID); err != nil {
+		return err
+	}
+	_, err := s.Tx.Exec(ctx, `
+		UPDATE books SET description = $3
+		 WHERE owner_user_id = $1 AND id = $2`,
+		s.Actor.UserID, bookID, description)
 	return err
 }
 

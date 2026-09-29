@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -88,6 +89,7 @@ type bookOut struct {
 	ID          int64    `json:"id"`
 	Slug        string   `json:"slug"`
 	DisplayName string   `json:"display_name"`
+	Description *string  `json:"description"`
 	IsActive    bool     `json:"is_active"`
 	SyncedTiers []string `json:"synced_tiers"`
 }
@@ -106,7 +108,7 @@ func (a *api) listBooks(w http.ResponseWriter, r *http.Request) {
 		}
 		out = make([]bookOut, 0, len(books))
 		for _, b := range books {
-			out = append(out, bookOut{b.ID, b.Slug, b.DisplayName, b.IsActive, b.SyncedTiers})
+			out = append(out, bookOut{b.ID, b.Slug, b.DisplayName, b.Description, b.IsActive, b.SyncedTiers})
 		}
 		return nil
 	})
@@ -136,13 +138,14 @@ func (a *api) createBook(w http.ResponseWriter, r *http.Request) {
 		book, err = s.CreateBook(r.Context(), body.Slug, body.DisplayName, body.Description, sortOrder)
 		return err
 	})
-	writeJSON(w, 201, bookOut{book.ID, book.Slug, book.DisplayName, book.IsActive, book.SyncedTiers}, err)
+	writeJSON(w, 201, bookOut{book.ID, book.Slug, book.DisplayName, book.Description, book.IsActive, book.SyncedTiers}, err)
 }
 
 type bookPatch struct {
 	Active      *bool    `json:"active"`
 	SyncedTiers []string `json:"synced_tiers"`
 	DisplayName *string  `json:"display_name"`
+	Description *string  `json:"description"`
 }
 
 func (a *api) updateBook(w http.ResponseWriter, r *http.Request) {
@@ -176,6 +179,11 @@ func (a *api) updateBook(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.DisplayName != nil {
 			if err := s.RenameBook(r.Context(), id, *body.DisplayName); err != nil {
+				return err
+			}
+		}
+		if body.Description != nil {
+			if err := s.SetBookDescription(r.Context(), id, body.Description); err != nil {
 				return err
 			}
 		}
@@ -456,12 +464,21 @@ func (a *api) searchContacts(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query().Get("q")
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	var bookID *int64
+	if raw := r.URL.Query().Get("book"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			writeErr(w, model.ErrPrecondition)
+			return
+		}
+		bookID = &id
+	}
 	var result struct {
 		Contacts []contactOut `json:"contacts"`
 		NextPage bool         `json:"next_page"`
 	}
 	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
-		res, err := s.Search(r.Context(), store.SearchParams{Query: q, Page: page})
+		res, err := s.Search(r.Context(), store.SearchParams{Query: q, BookID: bookID, Page: page})
 		if err != nil {
 			return err
 		}
@@ -692,10 +709,31 @@ type signupIn struct {
 	Password string `json:"password"`
 }
 
+// usernameShape mirrors the users.username check constraint, so a bad shape is
+// rejected as 400 rather than surfacing as a 500 from the constraint.
+var usernameShape = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,63}$`)
+
+func validateSignup(body signupIn) error {
+	if !usernameShape.MatchString(body.Username) {
+		return model.ErrPrecondition
+	}
+	if !strings.Contains(body.Email, "@") || strings.ContainsAny(body.Email, " \t") {
+		return model.ErrPrecondition
+	}
+	if body.Password == "" {
+		return model.ErrPrecondition
+	}
+	return nil
+}
+
 // signup creates an account with its system book. Anonymous.
 func (a *api) signup(w http.ResponseWriter, r *http.Request) {
 	var body signupIn
 	if err := decodeJSON(r, &body); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := validateSignup(body); err != nil {
 		writeErr(w, err)
 		return
 	}
