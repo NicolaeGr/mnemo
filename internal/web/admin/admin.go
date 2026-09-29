@@ -5,11 +5,13 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"strconv"
 
 	"github.com/a-h/templ"
+	"github.com/emersion/go-vcard"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nicolaegr/mnemo/internal/model"
@@ -51,6 +53,10 @@ func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) ht
 	mux.Handle("POST /dashboard/devices/{id}/tier", a.mutate(http.HandlerFunc(a.setDeviceTier)))
 	mux.Handle("POST /dashboard/devices/{id}/overrides", a.mutate(http.HandlerFunc(a.setDeviceOverrides)))
 	mux.Handle("POST /dashboard/devices/{id}/delete", a.mutate(http.HandlerFunc(a.deleteDevice)))
+	mux.Handle("GET /dashboard/contacts", a.dashPage("Contacts", a.contactsLeaf))
+	mux.Handle("GET /dashboard/contacts/search", a.requireSession(http.HandlerFunc(a.searchContacts)))
+	mux.Handle("POST /dashboard/contacts/{id}/tags", a.mutate(http.HandlerFunc(a.setContactTags)))
+	mux.Handle("POST /dashboard/contacts/{id}/delete", a.mutate(http.HandlerFunc(a.deleteContact)))
 	mux.Handle("GET /dashboard/settings", a.dashPage("Settings", a.settingsLeaf))
 
 	return mux
@@ -250,6 +256,134 @@ func (a *Admin) renderBookList(w http.ResponseWriter, r *http.Request, cause err
 func (a *Admin) actor(r *http.Request) model.Actor {
 	s := uictx.From(r.Context())
 	return model.Actor{UserID: s.UserID, Username: s.Username}
+}
+
+func (a *Admin) contactsLeaf(r *http.Request) templ.Component {
+	q := r.URL.Query().Get("q")
+	views, books, err := a.contactViews(r, q)
+	if err != nil {
+		return pages.ContactsPage(nil, nil, q, err.Error())
+	}
+	return pages.ContactsPage(views, books, q, "")
+}
+
+func (a *Admin) searchContacts(w http.ResponseWriter, r *http.Request) {
+	a.renderContactList(w, r, "", nil)
+}
+
+func (a *Admin) contactViews(r *http.Request, q string) ([]pages.ContactView, []store.Book, error) {
+	var views []pages.ContactView
+	var active []store.Book
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		books, err := s.ListBooks(r.Context())
+		if err != nil {
+			return err
+		}
+		for _, b := range books {
+			if b.IsActive {
+				active = append(active, b)
+			}
+		}
+		res, err := s.Search(r.Context(), store.SearchParams{Query: q, Per: 50})
+		if err != nil {
+			return err
+		}
+		views = make([]pages.ContactView, 0, len(res.Contacts))
+		for _, c := range res.Contacts {
+			ids, err := s.ContactBookIDs(r.Context(), c.ID)
+			if err != nil {
+				return err
+			}
+			tagged := make(map[int64]bool, len(ids))
+			for _, id := range ids {
+				tagged[id] = true
+			}
+			views = append(views, pages.ContactView{Contact: c, Name: displayName(c), Books: tagged})
+		}
+		return nil
+	})
+	return views, active, err
+}
+
+// displayName reads FN from the stored vcard, falling back to the UID.
+func displayName(c store.Contact) string {
+	if card, err := vcard.NewDecoder(bytes.NewBufferString(c.VCardText)).Decode(); err == nil {
+		if fn := card.Value(vcard.FieldFormattedName); fn != "" {
+			return fn
+		}
+	}
+	return c.UID
+}
+
+func (a *Admin) setContactTags(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	want := make(map[int64]bool)
+	for _, v := range r.Form["book"] {
+		if bookID, err := strconv.ParseInt(v, 10, 64); err == nil {
+			want[bookID] = true
+		}
+	}
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
+			return err
+		}
+		ids, err := s.ContactBookIDs(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		current := make(map[int64]bool, len(ids))
+		for _, b := range ids {
+			current[b] = true
+		}
+		var add, remove []int64
+		for b := range want {
+			if !current[b] {
+				add = append(add, b)
+			}
+		}
+		for b := range current {
+			if !want[b] {
+				remove = append(remove, b)
+			}
+		}
+		return s.Retag(r.Context(), id, add, remove)
+	})
+	a.renderContactList(w, r, "", err)
+}
+
+func (a *Admin) deleteContact(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
+			return err
+		}
+		c, err := s.LiveContactByID(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		_, err = s.DeleteContact(r.Context(), c.Filename)
+		return err
+	})
+	a.renderContactList(w, r, "", err)
+}
+
+func (a *Admin) renderContactList(w http.ResponseWriter, r *http.Request, _ string, cause error) {
+	msg := ""
+	if cause != nil {
+		msg = cause.Error()
+	}
+	views, books, err := a.contactViews(r, "")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	renderTempl(w, r, pages.ContactList(views, books, msg))
 }
 
 func (a *Admin) devicesLeaf(r *http.Request) templ.Component {

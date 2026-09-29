@@ -180,6 +180,64 @@ func TestAdminDevices(t *testing.T) {
 	}
 }
 
+func TestAdminContacts(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	users := store.NewUsers(pool)
+	user, system, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
+	if err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
+	h := admin.New(users, pool, mgr)
+	cookie, csrf := login(t, h, mgr, "admin", "secret")
+
+	do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}}, cookie)
+	var workID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM books WHERE slug = 'work'`).Scan(&workID); err != nil {
+		t.Fatalf("read book: %v", err)
+	}
+
+	var cid int64
+	card := "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:urn:uuid:alice\r\nFN:Alice Example\r\nEND:VCARD\r\n"
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO contacts (user_id, filename, uid, vcard_text, search_meta, etag)
+		VALUES ($1, 'alice.vcf', 'urn:uuid:alice', $2, '{}', 'e') RETURNING id`, user.ID, card).Scan(&cid); err != nil {
+		t.Fatalf("insert contact: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)`, cid, system.ID); err != nil {
+		t.Fatalf("tag system: %v", err)
+	}
+
+	if rec := do(h, "GET", "/dashboard/contacts", nil, cookie); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Alice Example") {
+		t.Fatalf("contacts page = %d, body missing name", rec.Code)
+	}
+	if rec := do(h, "GET", "/dashboard/contacts/search?q=Alice", nil, cookie); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Alice Example") {
+		t.Fatalf("search = %d, body missing name", rec.Code)
+	}
+
+	rec := do(h, "POST", "/dashboard/contacts/"+strconv.FormatInt(cid, 10)+"/tags",
+		url.Values{"csrf": {csrf}, "book": {strconv.FormatInt(workID, 10)}}, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tag = %d, want 200", rec.Code)
+	}
+	var tagged bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $2)`, cid, workID).Scan(&tagged); err != nil || !tagged {
+		t.Fatalf("contact not tagged (tagged=%v err=%v)", tagged, err)
+	}
+
+	rec = do(h, "POST", "/dashboard/contacts/"+strconv.FormatInt(cid, 10)+"/delete",
+		url.Values{"csrf": {csrf}}, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete = %d, want 200", rec.Code)
+	}
+	var deleted bool
+	if err := pool.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM contacts WHERE id = $1`, cid).Scan(&deleted); err != nil || !deleted {
+		t.Fatalf("contact not soft-deleted (deleted=%v err=%v)", deleted, err)
+	}
+}
+
 func login(t *testing.T, h http.Handler, mgr *websession.Manager, user, pass string) (*http.Cookie, string) {
 	t.Helper()
 	rec := do(h, "POST", "/login", url.Values{"username": {user}, "password": {pass}}, nil)

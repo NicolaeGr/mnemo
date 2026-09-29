@@ -1,0 +1,83 @@
+package pages
+
+import (
+	"strconv"
+
+	"github.com/nicolaegr/mnemo/internal/store"
+	"github.com/nicolaegr/mnemo/internal/web/uictx"
+)
+
+// ContactView is one contact plus the books it is tagged into.
+type ContactView struct {
+	Contact store.Contact
+	Name    string
+	Books   map[int64]bool
+}
+
+templ ContactsPage(contacts []ContactView, books []store.Book, q, errMsg string) {
+	<div class="space-y-6">
+		<div>
+			<h1 class="text-2xl font-bold tracking-tight">Contacts</h1>
+			<p class="mt-1 text-sm text-muted-foreground">Search and tag the contacts you sync.</p>
+		</div>
+		<input
+			type="search"
+			name="q"
+			value={ q }
+			placeholder="Search by name or phone"
+			hx-get="/dashboard/contacts/search"
+			hx-target="#contacts-list"
+			hx-swap="outerHTML"
+			hx-trigger="keyup changed delay:300ms, search"
+			class="w-full max-w-sm rounded-md border border-input bg-background px-3 py-2 text-sm"
+		/>
+		@ContactList(contacts, books, errMsg)
+	</div>
+}
+
+templ ContactList(contacts []ContactView, books []store.Book, errMsg string) {
+	<div id="contacts-list" class="space-y-4">
+		if errMsg != "" {
+			<p class="rounded-md border border-red-600/40 bg-red-600/10 px-3 py-2 text-sm text-red-600">{ errMsg }</p>
+		}
+		if len(contacts) == 0 {
+			<p class="text-sm text-muted-foreground">No contacts.</p>
+		} else {
+			for _, c := range contacts {
+				@ContactCard(c, books)
+			}
+		}
+	</div>
+}
+
+templ ContactCard(c ContactView, books []store.Book) {
+	<div class="rounded-lg border border-border bg-background p-4">
+		<div class="flex flex-wrap items-baseline gap-2">
+			<span class="font-medium">{ c.Name }</span>
+			<span class="text-xs text-muted-foreground">{ c.Contact.UID }</span>
+			<span class="text-xs text-muted-foreground">{ c.Contact.Filename }</span>
+		</div>
+		<form
+			hx-post={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/tags" }
+			hx-target="#contacts-list"
+			hx-swap="outerHTML"
+			class="mt-3 flex flex-wrap items-center gap-3"
+		>
+			<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+			<span class="text-xs font-medium text-muted-foreground">Books</span>
+			for _, b := range books {
+				<label class="flex items-center gap-1.5 text-sm">
+					<input type="checkbox" name="book" value={ strconv.FormatInt(b.ID, 10) } checked?={ c.Books[b.ID] }/>
+					{ b.DisplayName }
+				</label>
+			}
+			<button type="submit" class="btn btn-secondary px-3 py-1.5 text-xs">Save tags</button>
+			<button
+				type="submit"
+				class="btn btn-secondary px-3 py-1.5 text-xs text-red-600"
+				hx-post={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/delete" }
+				hx-confirm="Delete this contact? It is soft-deleted and purged after two days."
+			>Delete</button>
+		</form>
+	</div>
+}
