@@ -1,65 +1,41 @@
 package layouts
 
-import "github.com/nicolaegr/mnemo/internal/web/seg"
-
-// ModalShell renders a page-modal shell inside #modal-root. current is the
-// URL the modal is open at; parent is the URL "back" should go to.
-templ ModalShell(opts seg.ModalOpts, owner, current, parent string, child templ.Component) {
-	<div class="fixed inset-0 z-50 grid place-items-center p-4" data-page-modal>
-		if opts.Backdrop {
-			<div class="absolute inset-0 bg-black/40 backdrop-blur-sm" hx-get={ parent } hx-push-url="true" aria-hidden="true"></div>
-		} else {
-			<div class="absolute inset-0 bg-black/40 backdrop-blur-sm" aria-hidden="true"></div>
-		}
+// Modal is the shell every add/edit form opens in: it drops content into
+// #modal-root and every close affordance (backdrop, X, Escape) asks the server
+// for an empty body, which clears that container.
+templ Modal(title string, child templ.Component) {
+	<div class="fixed inset-0 z-50 grid place-items-center p-4">
 		<div
-			class={ "relative w-full overflow-hidden rounded-xl border border-border bg-background shadow-xl" ,
-		modalSize(opts.Size) }
-		>
-			<div class="flex items-center justify-between border-b border-border px-5 py-3">
-				<div class="text-sm font-medium">Settings</div>
-				<div class="flex items-center gap-1">
-					if opts.Expand {
-						<button
-							type="button"
-							title="Open in full page"
-							class="js-expand grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-							hx-get={ current }
-							hx-push-url="true"
-							hx-headers={ seg.ModalNoneHeader(owner) }
-						>
-							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>
-						</button>
-					}
-					if opts.CloseX {
-						<button
-							type="button"
-							title="Close"
-							class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-							hx-get={ parent }
-							hx-push-url="true"
-						>
-							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
-						</button>
-					}
-				</div>
+			class="absolute inset-0 bg-black/40 backdrop-blur-sm"
+			hx-get="/dashboard/modal/close"
+			hx-target="#modal-root"
+			hx-swap="innerHTML"
+			aria-hidden="true"
+		></div>
+		<div class="relative w-full max-w-lg overflow-hidden rounded-xl border border-border bg-background shadow-xl">
+			<div class="flex items-center justify-between border-b border-border px-4 py-3">
+				<span id="modal-title" class="text-sm font-medium">{ title }</span>
+				<button
+					type="button"
+					title="Close"
+					class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+					hx-get="/dashboard/modal/close"
+					hx-target="#modal-root"
+					hx-swap="innerHTML"
+				>
+					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+				</button>
 			</div>
-			<div class="max-h-[75vh] overflow-y-auto p-5">
+			<div class="max-h-[75vh] overflow-y-auto p-4">
 				@child
 			</div>
-			if opts.Esc {
-				<div class="hidden" hx-get={ parent } hx-push-url="true" hx-trigger="keyup[key=='Escape'] from:body"></div>
-			}
 		</div>
+		<div
+			class="hidden"
+			hx-get="/dashboard/modal/close"
+			hx-target="#modal-root"
+			hx-swap="innerHTML"
+			hx-trigger="keyup[key=='Escape'] from:body"
+		></div>
 	</div>
-}
-
-func modalSize(size string) string {
-	switch size {
-	case "sm":
-		return "max-w-sm"
-	case "lg":
-		return "max-w-2xl"
-	default:
-		return "max-w-lg"
-	}
 }

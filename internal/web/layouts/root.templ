@@ -12,6 +12,7 @@ templ RootSegment(child templ.Component) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ seg.PageTitle(ctx) }</title>
+			<style>[x-cloak]{display:none !important}</style>
 			<link rel="stylesheet" href="/static/output.css"/>
 			<script src="/static/theme.js"></script>
 			<script defer src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>

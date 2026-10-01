@@ -90,6 +90,16 @@ func mapSignupError(err error) error {
 	return err
 }
 
+// BookSlugTaken reports whether the actor already owns a book with this slug, so
+// the add form can warn before the unique constraint fires.
+func (s ScopedStore) BookSlugTaken(ctx context.Context, slug string) (bool, error) {
+	var taken bool
+	err := s.Tx.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM books WHERE owner_user_id = $1 AND slug = $2)`,
+		s.Actor.UserID, slug).Scan(&taken)
+	return taken, err
+}
+
 // ActiveBooks lists the actor's active books within the current tx (the read
 // the resolver is built on).
 func (s ScopedStore) ActiveBooks(ctx context.Context) ([]Book, error) {
@@ -100,6 +110,15 @@ func (s ScopedStore) ActiveBooks(ctx context.Context) ([]Book, error) {
 // that must be able to reactivate a hidden book.
 func (s ScopedStore) ListBooks(ctx context.Context) ([]Book, error) {
 	return s.queryBooks(ctx, `WHERE owner_user_id = $1`)
+}
+
+// GetBook returns one owned book, or ErrNotFound.
+func (s ScopedStore) GetBook(ctx context.Context, bookID int64) (Book, error) {
+	return scanBook(s.Tx.QueryRow(ctx, `
+		SELECT id, owner_user_id, slug, display_name, description, sort_order,
+		       is_active, is_system, synced_tiers::text[], created_at
+		  FROM books
+		 WHERE owner_user_id = $1 AND id = $2`, s.Actor.UserID, bookID))
 }
 
 func (s ScopedStore) queryBooks(ctx context.Context, where string) ([]Book, error) {
@@ -176,9 +195,23 @@ func (s ScopedStore) SetBookActive(ctx context.Context, bookID int64, active boo
 }
 
 // SetBookTiers replaces a book's synced_tiers; a real change bumps all of the
-// actor's principals. Caller holds LockSync.
+// actor's principals. The system book's tiers are fixed (it is every device's
+// fallback), and a set must be non-empty with archived kept exclusive. Caller
+// holds LockSync.
 func (s ScopedStore) SetBookTiers(ctx context.Context, bookID int64, tiers []string) error {
-	if err := s.requireOwnedBook(ctx, bookID); err != nil {
+	var isSystem bool
+	if err := s.Tx.QueryRow(ctx, `
+		SELECT is_system FROM books WHERE owner_user_id = $1 AND id = $2`,
+		s.Actor.UserID, bookID).Scan(&isSystem); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return model.ErrNotFound
+		}
+		return err
+	}
+	if isSystem {
+		return model.ErrConflict
+	}
+	if err := validTiers(tiers); err != nil {
 		return err
 	}
 	tag, err := s.Tx.Exec(ctx, `
@@ -190,6 +223,28 @@ func (s ScopedStore) SetBookTiers(ctx context.Context, bookID int64, tiers []str
 	}
 	if tag.RowsAffected() > 0 {
 		return s.bumpAllPrincipals(ctx)
+	}
+	return nil
+}
+
+// validTiers rejects an empty set and one mixing archived with the live tiers.
+func validTiers(tiers []string) error {
+	if len(tiers) == 0 {
+		return model.ErrInvalidTiers
+	}
+	var archived, live bool
+	for _, t := range tiers {
+		switch t {
+		case "archived":
+			archived = true
+		case "primary", "secondary":
+			live = true
+		default:
+			return model.ErrInvalidTiers
+		}
+	}
+	if archived && live {
+		return model.ErrInvalidTiers
 	}
 	return nil
 }

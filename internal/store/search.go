@@ -45,12 +45,16 @@ func (s ScopedStore) Search(ctx context.Context, p SearchParams) (ContactSearch,
 			"c.id IN (SELECT contact_id FROM contact_books WHERE book_id = $%d)", arg(*p.BookID)))
 	}
 	if q := strings.TrimSpace(p.Query); q != "" {
-		fn := fmt.Sprintf("c.search_meta->>'fn' ILIKE '%%' || $%d || '%%'", arg(q))
-		if digits := phoneDigits(q); digits != "" {
-			tel := fmt.Sprintf("c.search_meta->>'tel_norm' ILIKE '%%' || $%d || '%%'", arg(digits))
-			fn = "(" + fn + " OR " + tel + ")"
+		lit := arg(q)
+		or := []string{
+			fmt.Sprintf("c.search_meta->>'fn' ILIKE '%%' || $%d || '%%'", lit),
+			fmt.Sprintf("c.search_meta->>'n' ILIKE '%%' || $%d || '%%'", lit),
+			fmt.Sprintf("c.search_meta->>'org' ILIKE '%%' || $%d || '%%'", lit),
 		}
-		conds = append(conds, fn)
+		if digits := phoneDigits(q); digits != "" {
+			or = append(or, fmt.Sprintf("c.search_meta->>'tel_norm' ILIKE '%%' || $%d || '%%'", arg(digits)))
+		}
+		conds = append(conds, "("+strings.Join(or, " OR ")+")")
 	}
 
 	query := fmt.Sprintf(`

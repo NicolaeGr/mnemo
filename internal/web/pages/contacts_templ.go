@@ -9,19 +9,73 @@ import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
 import (
+	"encoding/json"
 	"strconv"
 
+	"github.com/nicolaegr/mnemo/internal/contact"
 	"github.com/nicolaegr/mnemo/internal/store"
 	"github.com/nicolaegr/mnemo/internal/web/uictx"
 )
 
-// ContactView is one contact plus the books it is tagged into.
+// ContactView is one contact plus the books it is tagged into (the list row).
 type ContactView struct {
 	Contact store.Contact
 	Name    string
 	Tel     string
 	Email   string
 	Books   map[int64]bool
+}
+
+// ContactFormData seeds the contact editor.
+type ContactFormData struct {
+	ID         int64
+	UID        string
+	Filename   string
+	TitleBase  string
+	FullName   string
+	Prefix     string
+	Given      string
+	Additional string
+	Family     string
+	Suffix     string
+	Fields     []contact.Field
+	Addresses  []contact.Address
+	Books      []store.Book // choosable books (active, excluding the default)
+	Selected   []int64      // currently tagged non-default books
+	Action     string
+}
+
+func bookOptions(books []store.Book) []MultiOption {
+	out := make([]MultiOption, 0, len(books))
+	for _, b := range books {
+		out = append(out, MultiOption{Value: b.ID, Label: b.DisplayName})
+	}
+	return out
+}
+
+func contactEditorData(d ContactFormData) string {
+	fields := d.Fields
+	if fields == nil {
+		fields = []contact.Field{}
+	}
+	addresses := d.Addresses
+	if addresses == nil {
+		addresses = []contact.Address{}
+	}
+	data, _ := json.Marshal(map[string]any{
+		"fields":       fields,
+		"addresses":    addresses,
+		"titleBase":    d.TitleBase,
+		"prefix":       d.Prefix,
+		"given":        d.Given,
+		"additional":   d.Additional,
+		"family":       d.Family,
+		"suffix":       d.Suffix,
+		"kinds":        contact.Kinds(),
+		"nameParts":    contact.NameParts(),
+		"addressParts": contact.AddressParts(),
+	})
+	return string(data)
 }
 
 func ContactsPage(contacts []ContactView, books []store.Book, q, errMsg string) templ.Component {
@@ -45,33 +99,20 @@ func ContactsPage(contacts []ContactView, books []store.Book, q, errMsg string) 
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\"><div><h1 class=\"text-2xl font-bold tracking-tight\">Contacts</h1><p class=\"mt-1 text-sm text-muted-foreground\">Search and tag the contacts you sync.</p></div><input type=\"search\" name=\"q\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\"><div class=\"flex items-end justify-between gap-4\"><div class=\"space-y-2\"><h1 class=\"text-xl font-semibold tracking-tight\">Contacts</h1><input type=\"search\" name=\"q\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.ResolveAttributeValue(q)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 28, Col: 12}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 81, Col: 14}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\" placeholder=\"Search by name or phone\" hx-get=\"/dashboard/contacts/search\" hx-target=\"#contacts-list\" hx-swap=\"outerHTML\" hx-trigger=\"keyup changed delay:300ms, search\" class=\"w-full max-w-sm rounded-md border border-input bg-background px-3 py-2 text-sm\"><form hx-post=\"/dashboard/contacts\" hx-target=\"#contacts-list\" hx-swap=\"outerHTML\" class=\"flex flex-wrap items-end gap-3 rounded-lg border border-border bg-background p-4\"><input type=\"hidden\" name=\"csrf\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var3 string
-		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(uictx.From(ctx).CSRF)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 42, Col: 64}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\"><div class=\"space-y-1.5\"><label class=\"text-xs font-medium text-muted-foreground\" for=\"new-name\">Name</label> <input id=\"new-name\" name=\"name\" required placeholder=\"Alice Example\" class=\"rounded-md border border-input bg-background px-3 py-2 text-sm\"></div><div class=\"space-y-1.5\"><label class=\"text-xs font-medium text-muted-foreground\" for=\"new-tel\">Phone</label> <input id=\"new-tel\" name=\"tel\" placeholder=\"+1 555 0100\" class=\"rounded-md border border-input bg-background px-3 py-2 text-sm\"></div><div class=\"space-y-1.5\"><label class=\"text-xs font-medium text-muted-foreground\" for=\"new-email\">Email</label> <input id=\"new-email\" name=\"email\" type=\"email\" class=\"rounded-md border border-input bg-background px-3 py-2 text-sm\"></div><button type=\"submit\" class=\"btn btn-secondary bg-accent text-accent-foreground px-3 py-2 text-sm\">Add contact</button></form>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\" placeholder=\"Search by name, org, or phone\" hx-get=\"/dashboard/contacts/search\" hx-target=\"#contacts-list\" hx-swap=\"outerHTML\" hx-trigger=\"keyup changed delay:300ms, search\" class=\"h-9 w-64 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring\"></div><button type=\"button\" class=\"inline-flex h-9 items-center rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90\" hx-get=\"/dashboard/contacts/new\" hx-target=\"#modal-root\" hx-swap=\"innerHTML\">Add contact</button></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -79,7 +120,7 @@ func ContactsPage(contacts []ContactView, books []store.Book, q, errMsg string) 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -103,36 +144,23 @@ func ContactList(contacts []ContactView, books []store.Book, errMsg string) temp
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var4 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var4 == nil {
-			templ_7745c5c3_Var4 = templ.NopComponent
+		templ_7745c5c3_Var3 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var3 == nil {
+			templ_7745c5c3_Var3 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div id=\"contacts-list\" class=\"space-y-4\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div id=\"contacts-list\" class=\"space-y-3\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if errMsg != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<p class=\"rounded-md border border-red-600/40 bg-red-600/10 px-3 py-2 text-sm text-red-600\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var5 string
-			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(errMsg)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 64, Col: 103}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</p>")
+			templ_7745c5c3_Err = ErrorBanner(errMsg).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if len(contacts) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<p class=\"text-sm text-muted-foreground\">No contacts.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<p class=\"text-sm text-muted-foreground\">No contacts.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -144,7 +172,7 @@ func ContactList(contacts []ContactView, books []store.Book, errMsg string) temp
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -168,201 +196,243 @@ func ContactCard(c ContactView, books []store.Book) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var6 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var6 == nil {
-			templ_7745c5c3_Var6 = templ.NopComponent
+		templ_7745c5c3_Var4 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var4 == nil {
+			templ_7745c5c3_Var4 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<div class=\"rounded-lg border border-border bg-background p-4\"><div class=\"flex flex-wrap items-baseline gap-2\"><span class=\"font-medium\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-4 py-3\"><div class=\"min-w-0\"><div class=\"flex flex-wrap items-baseline gap-2\"><span class=\"font-medium\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var7 string
-		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(c.Name)
+		var templ_7745c5c3_Var5 string
+		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(c.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 79, Col: 37}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 121, Col: 38}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</span> <span class=\"text-xs text-muted-foreground\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</span> <span class=\"text-xs text-muted-foreground\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var6 string
+		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(c.Contact.UID)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 122, Col: 63}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</span></div><div class=\"mt-1 flex flex-wrap gap-1\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		for _, b := range books {
+			if c.Books[b.ID] {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<span class=\"rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var7 string
+				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(b.DisplayName)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 127, Col: 96}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</span>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</div></div><button type=\"button\" class=\"inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var8 string
-		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(c.Contact.UID)
+		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue("/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/edit")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 80, Col: 62}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 135, Col: 82}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</span> <span class=\"text-xs text-muted-foreground\">")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var9 string
-		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(c.Contact.Filename)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 81, Col: 67}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" hx-target=\"#modal-root\" hx-swap=\"innerHTML\">Edit</button></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</span></div><form hx-post=\"")
+		return nil
+	})
+}
+
+func ContactForm(d ContactFormData) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var9 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var9 == nil {
+			templ_7745c5c3_Var9 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<form hx-post=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var10 string
-		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue("/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/tags")
+		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Action)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 84, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 144, Col: 20}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" hx-target=\"#contacts-list\" hx-swap=\"outerHTML\" class=\"mt-3 flex flex-wrap items-center gap-3\"><input type=\"hidden\" name=\"csrf\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" hx-target=\"#contacts-list\" hx-swap=\"outerHTML\" class=\"space-y-6\" x-data=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var11 string
-		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(uictx.From(ctx).CSRF)
+		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue("contactEditor(" + contactEditorData(d) + ")")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 89, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 148, Col: 56}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\"> <span class=\"text-xs font-medium text-muted-foreground\">Books</span> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\"><input type=\"hidden\" name=\"csrf\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		for _, b := range books {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<label class=\"flex items-center gap-1.5 text-sm\"><input type=\"checkbox\" name=\"book\" value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var12 string
-			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.FormatInt(b.ID, 10))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 93, Col: 75}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if c.Books[b.ID] {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, " checked")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "> ")
+		var templ_7745c5c3_Var12 string
+		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(uictx.From(ctx).CSRF)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 150, Col: 63}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\"><section class=\"relative space-y-3 pb-8\"><h3 class=\"text-xs font-semibold uppercase tracking-wide text-muted-foreground\">Name</h3><div class=\"grid grid-cols-2 gap-3\"><div><label class=\"mb-1 block text-xs font-medium text-muted-foreground\" for=\"n_given\">Given name</label> <input id=\"n_given\" name=\"n_given\" x-model=\"name.given\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring\"></div><div><label class=\"mb-1 block text-xs font-medium text-muted-foreground\" for=\"n_family\">Family name</label> <input id=\"n_family\" name=\"n_family\" x-model=\"name.family\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring\"></div><div x-show=\"name.extra.prefix\" x-cloak class=\"space-y-1\"><div class=\"flex items-center justify-between\"><label class=\"text-xs font-medium text-muted-foreground\" for=\"n_prefix\">Prefix</label> <button type=\"button\" @click=\"removeNamePart('prefix')\" title=\"Remove\" class=\"grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground\"><svg class=\"h-3 w-3\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"></path></svg></button></div><input id=\"n_prefix\" name=\"n_prefix\" x-model=\"name.prefix\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm\"></div><div x-show=\"name.extra.additional\" x-cloak class=\"space-y-1\"><div class=\"flex items-center justify-between\"><label class=\"text-xs font-medium text-muted-foreground\" for=\"n_additional\">Middle name</label> <button type=\"button\" @click=\"removeNamePart('additional')\" title=\"Remove\" class=\"grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground\"><svg class=\"h-3 w-3\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"></path></svg></button></div><input id=\"n_additional\" name=\"n_additional\" x-model=\"name.additional\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm\"></div><div x-show=\"name.extra.suffix\" x-cloak class=\"space-y-1\"><div class=\"flex items-center justify-between\"><label class=\"text-xs font-medium text-muted-foreground\" for=\"n_suffix\">Suffix</label> <button type=\"button\" @click=\"removeNamePart('suffix')\" title=\"Remove\" class=\"grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground\"><svg class=\"h-3 w-3\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"></path></svg></button></div><input id=\"n_suffix\" name=\"n_suffix\" x-model=\"name.suffix\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm\"></div></div><div class=\"absolute bottom-2 right-2\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = PartMenu("'name-menu'", "showNamePart(p.id)", "namePartsAvailable()", "+", "grid h-7 w-7 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</div></section><hr class=\"border-border\"><div class=\"space-y-5\"><template x-for=\"g in groups\" :key=\"g.kind\"><section class=\"space-y-3\"><div class=\"flex items-center justify-between border-b border-border pb-2\"><h4 class=\"text-xs font-semibold uppercase tracking-wide text-muted-foreground\" x-text=\"kindLabel(g.kind)\"></h4><template x-if=\"duplicable(g.kind)\"><button type=\"button\" @click=\"addRow(g.kind)\" class=\"inline-flex h-7 items-center rounded-md border border-border px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground\">+ Add another</button></template><template x-if=\"!duplicable(g.kind)\"><button type=\"button\" @click=\"removeGroup(g)\" title=\"Remove\" class=\"grid h-7 w-7 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground\"><svg class=\"h-3.5 w-3.5\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"></path></svg></button></template></div><div class=\"space-y-3\"><template x-for=\"(row, i) in g.rows\" :key=\"row.uid\"><div :class=\"g.kind === 'adr' ? 'relative rounded-md border border-border p-3 pb-9' : (duplicable(g.kind) ? 'relative rounded-md border border-border p-3 pr-10' : '')\"><template x-if=\"g.kind === 'adr'\"><div class=\"space-y-3\"><div class=\"flex items-center justify-between gap-2\"><input type=\"hidden\" name=\"adr_type\" :value=\"row.type\"> <select @change=\"row.type = $event.target.value\" class=\"h-8 rounded-md border border-input bg-background px-2 text-xs\" :class=\"row.type === '' ? 'text-muted-foreground' : ''\"><option value=\"\">type</option><template x-for=\"t in typesFor('adr')\" :key=\"t\"><option :value=\"t\" :selected=\"row.type === t\" x-text=\"t\"></option></template></select> <button type=\"button\" @click=\"removeRow(g, i)\" title=\"Remove address\" class=\"grid h-7 w-7 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground\"><svg class=\"h-3.5 w-3.5\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"></path></svg></button></div><div class=\"grid grid-cols-2 gap-3\"><input name=\"adr_street\" x-model=\"row.street\" placeholder=\"Street\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm\"> <input name=\"adr_city\" x-model=\"row.city\" placeholder=\"City\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm\"><div x-show=\"row.extra.pobox\" x-cloak class=\"space-y-1\"><div class=\"flex items-center justify-between\"><span class=\"text-xs font-medium text-muted-foreground\">PO box</span> <button type=\"button\" @click=\"removeAddressPart(i, 'pobox')\" title=\"Remove\" class=\"grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground\"><svg class=\"h-3 w-3\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"></path></svg></button></div><input name=\"adr_pobox\" x-model=\"row.pobox\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm\"></div><div x-show=\"row.extra.ext\" x-cloak class=\"space-y-1\"><div class=\"flex items-center justify-between\"><span class=\"text-xs font-medium text-muted-foreground\">Unit / ext</span> <button type=\"button\" @click=\"removeAddressPart(i, 'ext')\" title=\"Remove\" class=\"grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground\"><svg class=\"h-3 w-3\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"></path></svg></button></div><input name=\"adr_ext\" x-model=\"row.ext\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm\"></div><div x-show=\"row.extra.region\" x-cloak class=\"space-y-1\"><div class=\"flex items-center justify-between\"><span class=\"text-xs font-medium text-muted-foreground\">Region</span> <button type=\"button\" @click=\"removeAddressPart(i, 'region')\" title=\"Remove\" class=\"grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground\"><svg class=\"h-3 w-3\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"></path></svg></button></div><input name=\"adr_region\" x-model=\"row.region\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm\"></div><div x-show=\"row.extra.postal\" x-cloak class=\"space-y-1\"><div class=\"flex items-center justify-between\"><span class=\"text-xs font-medium text-muted-foreground\">Postal code</span> <button type=\"button\" @click=\"removeAddressPart(i, 'postal')\" title=\"Remove\" class=\"grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground\"><svg class=\"h-3 w-3\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"></path></svg></button></div><input name=\"adr_postal\" x-model=\"row.postal\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm\"></div><div x-show=\"row.extra.country\" x-cloak class=\"space-y-1\"><div class=\"flex items-center justify-between\"><span class=\"text-xs font-medium text-muted-foreground\">Country</span> <button type=\"button\" @click=\"removeAddressPart(i, 'country')\" title=\"Remove\" class=\"grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground\"><svg class=\"h-3 w-3\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"></path></svg></button></div><input name=\"adr_country\" x-model=\"row.country\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm\"></div></div><div class=\"absolute bottom-2 right-2\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = PartMenu("'adr-menu-' + i", "showAddressPart(i, p.id)", "addressPartsAvailable(i)", "+", "grid h-7 w-7 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</div></div></template><template x-if=\"g.kind !== 'adr'\"><div><input type=\"hidden\" name=\"row_kind\" :value=\"g.kind\"> <input type=\"hidden\" name=\"row_key\" :value=\"row.key\"> <input type=\"hidden\" name=\"row_type\" :value=\"row.type\"><template x-if=\"duplicable(g.kind)\"><button type=\"button\" @click=\"removeRow(g, i)\" title=\"Remove\" class=\"absolute right-2 top-2 grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground\"><svg class=\"h-3 w-3\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"></path></svg></button></template><div :class=\"g.kind === 'custom' ? 'grid grid-cols-2 gap-3' : (hasTypes(g.kind) ? 'grid grid-cols-[9rem_1fr] gap-3' : 'grid grid-cols-1 gap-3')\"><template x-if=\"g.kind === 'custom'\"><input type=\"text\" x-model=\"row.key\" placeholder=\"X-KEY\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm\"></template><template x-if=\"g.kind !== 'custom' && hasTypes(g.kind)\"><select @change=\"row.type = $event.target.value\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none\" :class=\"row.type === '' ? 'text-muted-foreground' : ''\"><option value=\"\">type</option><template x-for=\"t in typesFor(g.kind)\" :key=\"t\"><option :value=\"t\" :selected=\"row.type === t\" x-text=\"t\"></option></template></select></template><input name=\"row_value\" x-model=\"row.value\" class=\"h-9 w-full rounded-md border border-input bg-background px-3 text-sm\"></div></div></template></div></template></div></section></template><div class=\"flex justify-end\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = PartMenu("'field-menu'", "addField(p.id)", "availableKinds()", "Add Field", "inline-flex h-9 items-center rounded-md border border-border bg-background px-3 text-sm transition-colors hover:bg-muted").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</div></div><hr class=\"border-border\"><section class=\"space-y-2\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = MultiSelect("book", "Books", bookOptions(d.Books), d.Selected, "").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</section>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if d.ID != 0 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<p class=\"text-xs text-muted-foreground\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var13 string
-			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(b.DisplayName)
+			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(d.UID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 94, Col: 20}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 328, Col: 51}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</label> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, " · ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var14 string
+			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(d.Filename)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 328, Col: 69}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<button type=\"submit\" class=\"btn btn-secondary px-3 py-1.5 text-xs\">Save tags</button></form><details class=\"mt-3\"><summary class=\"cursor-pointer text-xs font-medium text-muted-foreground\">Edit fields</summary><form hx-post=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<div class=\"flex items-center justify-between gap-2 pt-2\"><div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var14 string
-		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue("/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/edit")
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 102, Col: 84}
+		if d.ID != 0 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<button type=\"submit\" class=\"inline-flex h-9 items-center rounded-md border border-red-600/40 px-3 text-sm text-red-600 transition-colors hover:bg-red-600/10\" hx-post=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var15 string
+			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue("/dashboard/contacts/" + strconv.FormatInt(d.ID, 10) + "/delete")
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 336, Col: 80}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" hx-target=\"#contacts-list\" hx-swap=\"outerHTML\" hx-confirm=\"Delete this contact? It is soft-deleted and purged after two days.\">Delete</button>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" hx-target=\"#contacts-list\" hx-swap=\"outerHTML\" class=\"mt-3 flex flex-wrap items-end gap-3\"><input type=\"hidden\" name=\"csrf\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var15 string
-		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(uictx.From(ctx).CSRF)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 107, Col: 65}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\"><div class=\"space-y-1.5\"><label class=\"text-xs font-medium text-muted-foreground\">Name</label> <input name=\"name\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var16 string
-		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(c.Name)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 110, Col: 38}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
+		templ_7745c5c3_Err = PrimaryButton("Save").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" class=\"rounded-md border border-input bg-background px-3 py-2 text-sm\"></div><div class=\"space-y-1.5\"><label class=\"text-xs font-medium text-muted-foreground\">Phone</label> <input name=\"tel\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var17 string
-		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(c.Tel)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 114, Col: 36}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" class=\"rounded-md border border-input bg-background px-3 py-2 text-sm\"></div><div class=\"space-y-1.5\"><label class=\"text-xs font-medium text-muted-foreground\">Email</label> <input name=\"email\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var18 string
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(c.Email)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 118, Col: 40}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" class=\"rounded-md border border-input bg-background px-3 py-2 text-sm\"></div><button type=\"submit\" class=\"btn btn-secondary px-3 py-2 text-sm\">Save</button> <button type=\"submit\" class=\"btn btn-secondary px-3 py-2 text-sm text-red-600\" hx-post=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var19 string
-		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue("/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/delete")
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/pages/contacts.templ`, Line: 124, Col: 87}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" hx-confirm=\"Delete this contact? It is soft-deleted and purged after two days.\">Delete</button></form></details></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</div></form>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

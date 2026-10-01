@@ -48,14 +48,14 @@ func RootSegment(child templ.Component) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title><link rel=\"stylesheet\" href=\"/static/output.css\"><script src=\"/static/theme.js\"></script><script defer src=\"https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js\"></script><script defer src=\"https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js\"></script><script type=\"module\" src=\"https://unpkg.com/@oddbird/css-anchor-positioning\"></script><script src=\"/static/app.js\" defer></script></head><body data-stack=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title><style>[x-cloak]{display:none !important}</style><link rel=\"stylesheet\" href=\"/static/output.css\"><script src=\"/static/theme.js\"></script><script defer src=\"https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js\"></script><script defer src=\"https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js\"></script><script type=\"module\" src=\"https://unpkg.com/@oddbird/css-anchor-positioning\"></script><script src=\"/static/app.js\" defer></script></head><body data-stack=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(stackAttr(seg.StackIDs(ctx)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/layouts/root.templ`, Line: 22, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/layouts/root.templ`, Line: 23, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 		if templ_7745c5c3_Err != nil {

@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -49,8 +50,8 @@ func TestAdminLoginAndSession(t *testing.T) {
 
 	csrf := csrfFor(t, mgr, cookie)
 
-	if rec := do(h, "GET", "/dashboard", nil, cookie); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Overview") {
-		t.Fatalf("dashboard = %d, wants Overview", rec.Code)
+	if rec := do(h, "GET", "/dashboard", nil, cookie); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Overview") || !strings.Contains(rec.Body.String(), "output.css") {
+		t.Fatalf("dashboard = %d, wants Overview and the stylesheet", rec.Code)
 	}
 
 	// An htmx navigation without a session is redirected via the HX-Redirect header.
@@ -83,27 +84,47 @@ func TestAdminBooks(t *testing.T) {
 	h := admin.New(users, pool, mgr)
 	cookie, csrf := login(t, h, mgr, "admin", "secret")
 
-	rec := do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}}, cookie)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Work") {
-		t.Fatalf("create book = %d, body missing Work: %s", rec.Code, rec.Body.String())
+	// The slug checker reports availability before the unique constraint fires.
+	if rec := do(h, "GET", "/dashboard/books/slug?slug=work", nil, cookie); !strings.Contains(rec.Body.String(), `"available":true`) {
+		t.Fatalf("free slug check = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(h, "GET", "/dashboard/books/slug?slug=all", nil, cookie); !strings.Contains(rec.Body.String(), `"available":false`) {
+		t.Fatalf("system slug should be taken: %s", rec.Body.String())
+	}
+
+	rec := do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}, "tiers": {"primary", "secondary"}}, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Work") || !strings.Contains(rec.Body.String(), "modal-root") {
+		t.Fatalf("create book = %d, body missing Work or modal clear: %s", rec.Code, rec.Body.String())
 	}
 	var workID int64
 	if err := pool.QueryRow(ctx, `SELECT id FROM books WHERE slug = 'work'`).Scan(&workID); err != nil {
 		t.Fatalf("read created book: %v", err)
 	}
+	if rec := do(h, "GET", "/dashboard/books/slug?slug=work", nil, cookie); !strings.Contains(rec.Body.String(), `"available":false`) {
+		t.Fatalf("taken slug check = %d: %s", rec.Code, rec.Body.String())
+	}
 
-	// Deactivate the new book; the list must show it as inactive.
-	rec = do(h, "POST", "/dashboard/books/"+strconv.FormatInt(workID, 10)+"/active",
-		url.Values{"csrf": {csrf}, "active": {"false"}}, cookie)
+	// Deactivate the new book via the edit endpoint; the list must show it inactive.
+	rec = do(h, "POST", "/dashboard/books/"+strconv.FormatInt(workID, 10)+"/edit",
+		url.Values{"csrf": {csrf}, "display_name": {"Work"}, "tiers": {"primary", "secondary"}, "active": {"false"}}, cookie)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "inactive") {
 		t.Fatalf("deactivate = %d, body missing inactive: %s", rec.Code, rec.Body.String())
 	}
 
-	// The system book can't be hidden; the conflict surfaces in the list.
-	rec = do(h, "POST", "/dashboard/books/"+strconv.FormatInt(system.ID, 10)+"/active",
-		url.Values{"csrf": {csrf}, "active": {"false"}}, cookie)
-	if !strings.Contains(rec.Body.String(), "conflict") {
-		t.Fatalf("system deactivate body missing conflict: %s", rec.Body.String())
+	// The system book's tiers and active flag are fixed, so editing them is ignored.
+	rec = do(h, "POST", "/dashboard/books/"+strconv.FormatInt(system.ID, 10)+"/edit",
+		url.Values{"csrf": {csrf}, "display_name": {"Default Contacts"}, "tiers": {"archived"}, "active": {"false"}}, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("system edit = %d, want 200", rec.Code)
+	}
+	var sysActive bool
+	var sysTiers string
+	if err := pool.QueryRow(ctx,
+		`SELECT is_active, array_to_string(synced_tiers, ',') FROM books WHERE id = $1`, system.ID).Scan(&sysActive, &sysTiers); err != nil {
+		t.Fatalf("read system book: %v", err)
+	}
+	if !sysActive || !strings.Contains(sysTiers, "primary") {
+		t.Fatalf("system book changed: active=%v tiers=%q", sysActive, sysTiers)
 	}
 
 	rec = do(h, "POST", "/dashboard/books/"+strconv.FormatInt(workID, 10)+"/delete",
@@ -142,13 +163,7 @@ func TestAdminDevices(t *testing.T) {
 		t.Fatalf("read device: %v", err)
 	}
 
-	rec = do(h, "POST", "/dashboard/devices/"+strconv.FormatInt(pid, 10)+"/tier",
-		url.Values{"csrf": {csrf}, "tier": {"secondary"}}, cookie)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "secondary") {
-		t.Fatalf("set tier = %d, body missing secondary", rec.Code)
-	}
-
-	rec = do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}}, cookie)
+	rec = do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}, "tiers": {"primary", "secondary"}}, cookie)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create book = %d", rec.Code)
 	}
@@ -157,16 +172,24 @@ func TestAdminDevices(t *testing.T) {
 		t.Fatalf("read book: %v", err)
 	}
 
-	rec = do(h, "POST", "/dashboard/devices/"+strconv.FormatInt(pid, 10)+"/overrides",
-		url.Values{"csrf": {csrf}, "hide": {strconv.FormatInt(bookID, 10)}}, cookie)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("save overrides = %d", rec.Code)
+	// One edit call changes the tier and hides a book.
+	rec = do(h, "POST", "/dashboard/devices/"+strconv.FormatInt(pid, 10)+"/edit",
+		url.Values{"csrf": {csrf}, "label": {"phone"}, "tier": {"secondary"}, "hide": {strconv.FormatInt(bookID, 10)}}, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "secondary") {
+		t.Fatalf("edit device = %d, body missing secondary", rec.Code)
 	}
 	var hidden bool
 	if err := pool.QueryRow(ctx, `
 		SELECT EXISTS(SELECT 1 FROM principal_book_overrides
 		               WHERE principal_id = $1 AND book_id = $2 AND enabled = false)`, pid, bookID).Scan(&hidden); err != nil || !hidden {
 		t.Fatalf("override not recorded (hidden=%v err=%v)", hidden, err)
+	}
+
+	// The edit modal seeds the chip picker with the hidden book instead of checkboxes.
+	rec = do(h, "GET", "/dashboard/devices/"+strconv.FormatInt(pid, 10)+"/edit", nil, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "multiSelect(") ||
+		!strings.Contains(rec.Body.String(), `&#34;selected&#34;:[`+strconv.FormatInt(bookID, 10)+`]`) {
+		t.Fatalf("device modal missing picker seed: %s", rec.Body.String())
 	}
 
 	rec = do(h, "POST", "/dashboard/devices/"+strconv.FormatInt(pid, 10)+"/delete",
@@ -192,7 +215,7 @@ func TestAdminContacts(t *testing.T) {
 	h := admin.New(users, pool, mgr)
 	cookie, csrf := login(t, h, mgr, "admin", "secret")
 
-	do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}}, cookie)
+	do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}, "tiers": {"primary", "secondary"}}, cookie)
 	var workID int64
 	if err := pool.QueryRow(ctx, `SELECT id FROM books WHERE slug = 'work'`).Scan(&workID); err != nil {
 		t.Fatalf("read book: %v", err)
@@ -202,7 +225,7 @@ func TestAdminContacts(t *testing.T) {
 	card := "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:urn:uuid:alice\r\nFN:Alice Example\r\nEND:VCARD\r\n"
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO contacts (user_id, filename, uid, vcard_text, search_meta, etag)
-		VALUES ($1, 'alice.vcf', 'urn:uuid:alice', $2, '{}', 'e') RETURNING id`, user.ID, card).Scan(&cid); err != nil {
+		VALUES ($1, 'alice.vcf', 'urn:uuid:alice', $2, '{"fn":"Alice Example"}', 'e') RETURNING id`, user.ID, card).Scan(&cid); err != nil {
 		t.Fatalf("insert contact: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)`, cid, system.ID); err != nil {
@@ -216,8 +239,8 @@ func TestAdminContacts(t *testing.T) {
 		t.Fatalf("search = %d, body missing name", rec.Code)
 	}
 
-	rec := do(h, "POST", "/dashboard/contacts/"+strconv.FormatInt(cid, 10)+"/tags",
-		url.Values{"csrf": {csrf}, "book": {strconv.FormatInt(workID, 10)}}, cookie)
+	rec := do(h, "POST", "/dashboard/contacts/"+strconv.FormatInt(cid, 10)+"/edit",
+		url.Values{"csrf": {csrf}, "n_given": {"Alice"}, "n_family": {"Example"}, "book": {strconv.FormatInt(workID, 10)}}, cookie)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("tag = %d, want 200", rec.Code)
 	}
@@ -225,6 +248,11 @@ func TestAdminContacts(t *testing.T) {
 	if err := pool.QueryRow(ctx, `
 		SELECT EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $2)`, cid, workID).Scan(&tagged); err != nil || !tagged {
 		t.Fatalf("contact not tagged (tagged=%v err=%v)", tagged, err)
+	}
+	var inDefault bool
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $2)`, cid, system.ID).Scan(&inDefault); err != nil || inDefault {
+		t.Fatalf("contact stayed in the default book (inDefault=%v err=%v)", inDefault, err)
 	}
 
 	rec = do(h, "POST", "/dashboard/contacts/"+strconv.FormatInt(cid, 10)+"/delete",
@@ -250,7 +278,7 @@ func TestAdminSettingsAndContactCreate(t *testing.T) {
 	cookie, csrf := login(t, h, mgr, "admin", "secret")
 
 	// Point the default book at a freshly created one.
-	rec := do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}}, cookie)
+	rec := do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}, "tiers": {"primary", "secondary"}}, cookie)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create book = %d", rec.Code)
 	}
@@ -270,9 +298,12 @@ func TestAdminSettingsAndContactCreate(t *testing.T) {
 		t.Fatalf("default book = %v, want %d (err=%v)", def, bookID, err)
 	}
 
-	// Create a contact from the form.
+	// Create a contact from the form: name parts plus a property row.
 	rec = do(h, "POST", "/dashboard/contacts",
-		url.Values{"csrf": {csrf}, "name": {"Alice Example"}, "tel": {"+15550100"}, "email": {"alice@example.com"}}, cookie)
+		url.Values{
+			"csrf": {csrf}, "n_given": {"Alice"}, "n_family": {"Example"},
+			"row_kind": {"email"}, "row_type": {"work"}, "row_key": {""}, "row_value": {"alice@example.com"},
+		}, cookie)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Alice Example") {
 		t.Fatalf("create contact = %d, body missing name", rec.Code)
 	}
@@ -307,19 +338,78 @@ func TestAdminContactEdit(t *testing.T) {
 		t.Fatalf("tag system: %v", err)
 	}
 
+	// Structured name plus typed rows, including a custom key that must survive.
 	rec := do(h, "POST", "/dashboard/contacts/"+strconv.FormatInt(cid, 10)+"/edit",
-		url.Values{"csrf": {csrf}, "name": {"Alice B"}, "tel": {"+15550111"}, "email": {"a@b.c"}}, cookie)
+		url.Values{
+			"csrf":     {csrf},
+			"n_prefix": {"Dr."}, "n_given": {"Alice"}, "n_family": {"Smith"},
+			"row_kind":    {"tel", "email", "custom"},
+			"row_type":    {"cell", "work", ""},
+			"row_key":     {"", "", "ORG"},
+			"row_value":   {"+15550111", "a@b.c", "Acme"},
+			"adr_type":    {"work"},
+			"adr_street":  {"1 Main St"},
+			"adr_city":    {"Springfield"},
+			"adr_pobox":   {""},
+			"adr_ext":     {""},
+			"adr_region":  {"IL"},
+			"adr_postal":  {"62701"},
+			"adr_country": {"USA"},
+		}, cookie)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("edit = %d, want 200", rec.Code)
+		t.Fatalf("edit = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 	var text string
-	if err := pool.QueryRow(ctx, `SELECT vcard_text FROM contacts WHERE id = $1`, cid).Scan(&text); err != nil {
+	var metaJSON []byte
+	if err := pool.QueryRow(ctx, `SELECT vcard_text, search_meta FROM contacts WHERE id = $1`, cid).Scan(&text, &metaJSON); err != nil {
 		t.Fatalf("read vcard: %v", err)
 	}
-	for _, want := range []string{"FN:Alice B", "ORG:Acme", "a@b.c", "+15550111"} {
+	for _, want := range []string{"FN:Dr. Alice Smith", "N:Smith;Alice", "ORG:Acme", "a@b.c", "+15550111", "1 Main St", "Springfield"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("edited vcard missing %q:\n%s", want, text)
 		}
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(metaJSON, &meta); err != nil {
+		t.Fatalf("search_meta: %v", err)
+	}
+	if meta["fn"] != "Dr. Alice Smith" || meta["n"] != "Dr. Alice Smith" {
+		t.Fatalf("search_meta fn/n = %v/%v, want Dr. Alice Smith", meta["fn"], meta["n"])
+	}
+
+	// Surname is searchable through the derived name.
+	if rec := do(h, "GET", "/dashboard/contacts/search?q=Smith", nil, cookie); !strings.Contains(rec.Body.String(), "Dr. Alice Smith") {
+		t.Fatalf("surname search missed the contact: %s", rec.Body.String())
+	}
+
+	// The edit modal re-derives the exploded address fields from the stored ADR.
+	if rec := do(h, "GET", "/dashboard/contacts/"+strconv.FormatInt(cid, 10)+"/edit", nil, cookie); !strings.Contains(rec.Body.String(), "1 Main St") {
+		t.Fatalf("edit modal missing address: %s", rec.Body.String())
+	}
+}
+
+func TestAdminSidebarOOB(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	users := store.NewUsers(pool)
+	if _, _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4); err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
+	h := admin.New(users, pool, mgr)
+	cookie, _ := login(t, h, mgr, "admin", "secret")
+
+	// A fragment navigation returns the leaf plus an OOB refresh of the sidebar
+	// so its active state tracks the new page.
+	req := httptest.NewRequest("GET", "/dashboard/books", nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("X-Mounted-Segments", "root,dashboard")
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, "sidebar-nav") || !strings.Contains(body, "hx-swap-oob") {
+		t.Fatalf("fragment = %d, missing OOB sidebar: %s", rec.Code, body)
 	}
 }
 

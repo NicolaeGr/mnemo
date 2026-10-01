@@ -1,13 +1,15 @@
 package pages
 
 import (
+	"encoding/json"
 	"strconv"
 
+	"github.com/nicolaegr/mnemo/internal/contact"
 	"github.com/nicolaegr/mnemo/internal/store"
 	"github.com/nicolaegr/mnemo/internal/web/uictx"
 )
 
-// ContactView is one contact plus the books it is tagged into.
+// ContactView is one contact plus the books it is tagged into (the list row).
 type ContactView struct {
 	Contact store.Contact
 	Name    string
@@ -16,52 +18,91 @@ type ContactView struct {
 	Books   map[int64]bool
 }
 
+// ContactFormData seeds the contact editor.
+type ContactFormData struct {
+	ID         int64
+	UID        string
+	Filename   string
+	TitleBase  string
+	FullName   string
+	Prefix     string
+	Given      string
+	Additional string
+	Family     string
+	Suffix     string
+	Fields     []contact.Field
+	Addresses  []contact.Address
+	Books      []store.Book // choosable books (active, excluding the default)
+	Selected   []int64      // currently tagged non-default books
+	Action     string
+}
+
+func bookOptions(books []store.Book) []MultiOption {
+	out := make([]MultiOption, 0, len(books))
+	for _, b := range books {
+		out = append(out, MultiOption{Value: b.ID, Label: b.DisplayName})
+	}
+	return out
+}
+
+func contactEditorData(d ContactFormData) string {
+	fields := d.Fields
+	if fields == nil {
+		fields = []contact.Field{}
+	}
+	addresses := d.Addresses
+	if addresses == nil {
+		addresses = []contact.Address{}
+	}
+	data, _ := json.Marshal(map[string]any{
+		"fields":       fields,
+		"addresses":    addresses,
+		"titleBase":    d.TitleBase,
+		"prefix":       d.Prefix,
+		"given":        d.Given,
+		"additional":   d.Additional,
+		"family":       d.Family,
+		"suffix":       d.Suffix,
+		"kinds":        contact.Kinds(),
+		"nameParts":    contact.NameParts(),
+		"addressParts": contact.AddressParts(),
+	})
+	return string(data)
+}
+
 templ ContactsPage(contacts []ContactView, books []store.Book, q, errMsg string) {
 	<div class="space-y-6">
-		<div>
-			<h1 class="text-2xl font-bold tracking-tight">Contacts</h1>
-			<p class="mt-1 text-sm text-muted-foreground">Search and tag the contacts you sync.</p>
+		<div class="flex items-end justify-between gap-4">
+			<div class="space-y-2">
+				<h1 class="text-xl font-semibold tracking-tight">Contacts</h1>
+				<input
+					type="search"
+					name="q"
+					value={ q }
+					placeholder="Search by name, org, or phone"
+					hx-get="/dashboard/contacts/search"
+					hx-target="#contacts-list"
+					hx-swap="outerHTML"
+					hx-trigger="keyup changed delay:300ms, search"
+					class="h-9 w-64 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"
+				/>
+			</div>
+			<button
+				type="button"
+				class="inline-flex h-9 items-center rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90"
+				hx-get="/dashboard/contacts/new"
+				hx-target="#modal-root"
+				hx-swap="innerHTML"
+			>Add contact</button>
 		</div>
-		<input
-			type="search"
-			name="q"
-			value={ q }
-			placeholder="Search by name or phone"
-			hx-get="/dashboard/contacts/search"
-			hx-target="#contacts-list"
-			hx-swap="outerHTML"
-			hx-trigger="keyup changed delay:300ms, search"
-			class="w-full max-w-sm rounded-md border border-input bg-background px-3 py-2 text-sm"
-		/>
-		<form
-			hx-post="/dashboard/contacts"
-			hx-target="#contacts-list"
-			hx-swap="outerHTML"
-			class="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-background p-4"
-		>
-			<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-			<div class="space-y-1.5">
-				<label class="text-xs font-medium text-muted-foreground" for="new-name">Name</label>
-				<input id="new-name" name="name" required placeholder="Alice Example" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
-			</div>
-			<div class="space-y-1.5">
-				<label class="text-xs font-medium text-muted-foreground" for="new-tel">Phone</label>
-				<input id="new-tel" name="tel" placeholder="+1 555 0100" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
-			</div>
-			<div class="space-y-1.5">
-				<label class="text-xs font-medium text-muted-foreground" for="new-email">Email</label>
-				<input id="new-email" name="email" type="email" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
-			</div>
-			<button type="submit" class="btn btn-secondary bg-accent text-accent-foreground px-3 py-2 text-sm">Add contact</button>
-		</form>
 		@ContactList(contacts, books, errMsg)
 	</div>
 }
 
 templ ContactList(contacts []ContactView, books []store.Book, errMsg string) {
-	<div id="contacts-list" class="space-y-4">
+	<div id="contacts-list" class="space-y-3">
 		if errMsg != "" {
-			<p class="rounded-md border border-red-600/40 bg-red-600/10 px-3 py-2 text-sm text-red-600">{ errMsg }</p>
+			@ErrorBanner(errMsg)
 		}
 		if len(contacts) == 0 {
 			<p class="text-sm text-muted-foreground">No contacts.</p>
@@ -74,57 +115,232 @@ templ ContactList(contacts []ContactView, books []store.Book, errMsg string) {
 }
 
 templ ContactCard(c ContactView, books []store.Book) {
-	<div class="rounded-lg border border-border bg-background p-4">
-		<div class="flex flex-wrap items-baseline gap-2">
-			<span class="font-medium">{ c.Name }</span>
-			<span class="text-xs text-muted-foreground">{ c.Contact.UID }</span>
-			<span class="text-xs text-muted-foreground">{ c.Contact.Filename }</span>
+	<div class="flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-4 py-3">
+		<div class="min-w-0">
+			<div class="flex flex-wrap items-baseline gap-2">
+				<span class="font-medium">{ c.Name }</span>
+				<span class="text-xs text-muted-foreground">{ c.Contact.UID }</span>
+			</div>
+			<div class="mt-1 flex flex-wrap gap-1">
+				for _, b := range books {
+					if c.Books[b.ID] {
+						<span class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{ b.DisplayName }</span>
+					}
+				}
+			</div>
 		</div>
-		<form
-			hx-post={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/tags" }
-			hx-target="#contacts-list"
-			hx-swap="outerHTML"
-			class="mt-3 flex flex-wrap items-center gap-3"
-		>
-			<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-			<span class="text-xs font-medium text-muted-foreground">Books</span>
-			for _, b := range books {
-				<label class="flex items-center gap-1.5 text-sm">
-					<input type="checkbox" name="book" value={ strconv.FormatInt(b.ID, 10) } checked?={ c.Books[b.ID] }/>
-					{ b.DisplayName }
-				</label>
-			}
-			<button type="submit" class="btn btn-secondary px-3 py-1.5 text-xs">Save tags</button>
-		</form>
-		<details class="mt-3">
-			<summary class="cursor-pointer text-xs font-medium text-muted-foreground">Edit fields</summary>
-			<form
-				hx-post={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/edit" }
-				hx-target="#contacts-list"
-				hx-swap="outerHTML"
-				class="mt-3 flex flex-wrap items-end gap-3"
-			>
-				<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-				<div class="space-y-1.5">
-					<label class="text-xs font-medium text-muted-foreground">Name</label>
-					<input name="name" value={ c.Name } class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
-				</div>
-				<div class="space-y-1.5">
-					<label class="text-xs font-medium text-muted-foreground">Phone</label>
-					<input name="tel" value={ c.Tel } class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
-				</div>
-				<div class="space-y-1.5">
-					<label class="text-xs font-medium text-muted-foreground">Email</label>
-					<input name="email" value={ c.Email } class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
-				</div>
-				<button type="submit" class="btn btn-secondary px-3 py-2 text-sm">Save</button>
-				<button
-					type="submit"
-					class="btn btn-secondary px-3 py-2 text-sm text-red-600"
-					hx-post={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/delete" }
-					hx-confirm="Delete this contact? It is soft-deleted and purged after two days."
-				>Delete</button>
-			</form>
-		</details>
+		<button
+			type="button"
+			class="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted"
+			hx-get={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/edit" }
+			hx-target="#modal-root"
+			hx-swap="innerHTML"
+		>Edit</button>
 	</div>
+}
+
+templ ContactForm(d ContactFormData) {
+	<form
+		hx-post={ d.Action }
+		hx-target="#contacts-list"
+		hx-swap="outerHTML"
+		class="space-y-6"
+		x-data={ "contactEditor(" + contactEditorData(d) + ")" }
+	>
+		<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+		<section class="relative space-y-3 pb-8">
+			<h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Name</h3>
+			<div class="grid grid-cols-2 gap-3">
+				<div>
+					<label class="mb-1 block text-xs font-medium text-muted-foreground" for="n_given">Given name</label>
+					<input id="n_given" name="n_given" x-model="name.given" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"/>
+				</div>
+				<div>
+					<label class="mb-1 block text-xs font-medium text-muted-foreground" for="n_family">Family name</label>
+					<input id="n_family" name="n_family" x-model="name.family" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"/>
+				</div>
+				<div x-show="name.extra.prefix" x-cloak class="space-y-1">
+					<div class="flex items-center justify-between">
+						<label class="text-xs font-medium text-muted-foreground" for="n_prefix">Prefix</label>
+						<button type="button" @click="removeNamePart('prefix')" title="Remove" class="grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+							<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+						</button>
+					</div>
+					<input id="n_prefix" name="n_prefix" x-model="name.prefix" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"/>
+				</div>
+				<div x-show="name.extra.additional" x-cloak class="space-y-1">
+					<div class="flex items-center justify-between">
+						<label class="text-xs font-medium text-muted-foreground" for="n_additional">Middle name</label>
+						<button type="button" @click="removeNamePart('additional')" title="Remove" class="grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+							<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+						</button>
+					</div>
+					<input id="n_additional" name="n_additional" x-model="name.additional" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"/>
+				</div>
+				<div x-show="name.extra.suffix" x-cloak class="space-y-1">
+					<div class="flex items-center justify-between">
+						<label class="text-xs font-medium text-muted-foreground" for="n_suffix">Suffix</label>
+						<button type="button" @click="removeNamePart('suffix')" title="Remove" class="grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+							<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+						</button>
+					</div>
+					<input id="n_suffix" name="n_suffix" x-model="name.suffix" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"/>
+				</div>
+			</div>
+			<div class="absolute bottom-2 right-2">
+				@PartMenu("'name-menu'", "showNamePart(p.id)", "namePartsAvailable()", "+", "grid h-7 w-7 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground")
+			</div>
+		</section>
+		<hr class="border-border"/>
+		<div class="space-y-5">
+			<template x-for="g in groups" :key="g.kind">
+				<section class="space-y-3">
+					<div class="flex items-center justify-between border-b border-border pb-2">
+						<h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground" x-text="kindLabel(g.kind)"></h4>
+						<template x-if="duplicable(g.kind)">
+							<button type="button" @click="addRow(g.kind)" class="inline-flex h-7 items-center rounded-md border border-border px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">+ Add another</button>
+						</template>
+						<template x-if="!duplicable(g.kind)">
+							<button type="button" @click="removeGroup(g)" title="Remove" class="grid h-7 w-7 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+								<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+							</button>
+						</template>
+					</div>
+					<div class="space-y-3">
+						<template x-for="(row, i) in g.rows" :key="row.uid">
+							<div :class="g.kind === 'adr' ? 'relative rounded-md border border-border p-3 pb-9' : (duplicable(g.kind) ? 'relative rounded-md border border-border p-3 pr-10' : '')">
+								<template x-if="g.kind === 'adr'">
+									<div class="space-y-3">
+										<div class="flex items-center justify-between gap-2">
+											<input type="hidden" name="adr_type" :value="row.type"/>
+											<select
+												@change="row.type = $event.target.value"
+												class="h-8 rounded-md border border-input bg-background px-2 text-xs"
+												:class="row.type === '' ? 'text-muted-foreground' : ''"
+											>
+												<option value="">type</option>
+												<template x-for="t in typesFor('adr')" :key="t">
+													<option :value="t" :selected="row.type === t" x-text="t"></option>
+												</template>
+											</select>
+											<button type="button" @click="removeRow(g, i)" title="Remove address" class="grid h-7 w-7 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+												<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+											</button>
+										</div>
+										<div class="grid grid-cols-2 gap-3">
+											<input name="adr_street" x-model="row.street" placeholder="Street" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"/>
+											<input name="adr_city" x-model="row.city" placeholder="City" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"/>
+											<div x-show="row.extra.pobox" x-cloak class="space-y-1">
+												<div class="flex items-center justify-between">
+													<span class="text-xs font-medium text-muted-foreground">PO box</span>
+													<button type="button" @click="removeAddressPart(i, 'pobox')" title="Remove" class="grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+														<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+													</button>
+												</div>
+												<input name="adr_pobox" x-model="row.pobox" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"/>
+											</div>
+											<div x-show="row.extra.ext" x-cloak class="space-y-1">
+												<div class="flex items-center justify-between">
+													<span class="text-xs font-medium text-muted-foreground">Unit / ext</span>
+													<button type="button" @click="removeAddressPart(i, 'ext')" title="Remove" class="grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+														<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+													</button>
+												</div>
+												<input name="adr_ext" x-model="row.ext" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"/>
+											</div>
+											<div x-show="row.extra.region" x-cloak class="space-y-1">
+												<div class="flex items-center justify-between">
+													<span class="text-xs font-medium text-muted-foreground">Region</span>
+													<button type="button" @click="removeAddressPart(i, 'region')" title="Remove" class="grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+														<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+													</button>
+												</div>
+												<input name="adr_region" x-model="row.region" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"/>
+											</div>
+											<div x-show="row.extra.postal" x-cloak class="space-y-1">
+												<div class="flex items-center justify-between">
+													<span class="text-xs font-medium text-muted-foreground">Postal code</span>
+													<button type="button" @click="removeAddressPart(i, 'postal')" title="Remove" class="grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+														<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+													</button>
+												</div>
+												<input name="adr_postal" x-model="row.postal" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"/>
+											</div>
+											<div x-show="row.extra.country" x-cloak class="space-y-1">
+												<div class="flex items-center justify-between">
+													<span class="text-xs font-medium text-muted-foreground">Country</span>
+													<button type="button" @click="removeAddressPart(i, 'country')" title="Remove" class="grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+														<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+													</button>
+												</div>
+												<input name="adr_country" x-model="row.country" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"/>
+											</div>
+										</div>
+										<div class="absolute bottom-2 right-2">
+											@PartMenu("'adr-menu-' + i", "showAddressPart(i, p.id)", "addressPartsAvailable(i)", "+", "grid h-7 w-7 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground")
+										</div>
+									</div>
+								</template>
+								<template x-if="g.kind !== 'adr'">
+									<div>
+										<input type="hidden" name="row_kind" :value="g.kind"/>
+										<input type="hidden" name="row_key" :value="row.key"/>
+										<input type="hidden" name="row_type" :value="row.type"/>
+										<template x-if="duplicable(g.kind)">
+											<button type="button" @click="removeRow(g, i)" title="Remove" class="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+												<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+											</button>
+										</template>
+										<div :class="g.kind === 'custom' ? 'grid grid-cols-2 gap-3' : (hasTypes(g.kind) ? 'grid grid-cols-[9rem_1fr] gap-3' : 'grid grid-cols-1 gap-3')">
+											<template x-if="g.kind === 'custom'">
+												<input type="text" x-model="row.key" placeholder="X-KEY" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"/>
+											</template>
+											<template x-if="g.kind !== 'custom' && hasTypes(g.kind)">
+												<select
+													@change="row.type = $event.target.value"
+													class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none"
+													:class="row.type === '' ? 'text-muted-foreground' : ''"
+												>
+													<option value="">type</option>
+													<template x-for="t in typesFor(g.kind)" :key="t">
+														<option :value="t" :selected="row.type === t" x-text="t"></option>
+													</template>
+												</select>
+											</template>
+											<input name="row_value" x-model="row.value" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"/>
+										</div>
+									</div>
+								</template>
+							</div>
+						</template>
+					</div>
+				</section>
+			</template>
+			<div class="flex justify-end">
+				@PartMenu("'field-menu'", "addField(p.id)", "availableKinds()", "Add Field", "inline-flex h-9 items-center rounded-md border border-border bg-background px-3 text-sm transition-colors hover:bg-muted")
+			</div>
+		</div>
+		<hr class="border-border"/>
+		<section class="space-y-2">
+			@MultiSelect("book", "Books", bookOptions(d.Books), d.Selected, "")
+		</section>
+		if d.ID != 0 {
+			<p class="text-xs text-muted-foreground">{ d.UID } · { d.Filename }</p>
+		}
+		<div class="flex items-center justify-between gap-2 pt-2">
+			<div>
+				if d.ID != 0 {
+					<button
+						type="submit"
+						class="inline-flex h-9 items-center rounded-md border border-red-600/40 px-3 text-sm text-red-600 transition-colors hover:bg-red-600/10"
+						hx-post={ "/dashboard/contacts/" + strconv.FormatInt(d.ID, 10) + "/delete" }
+						hx-target="#contacts-list"
+						hx-swap="outerHTML"
+						hx-confirm="Delete this contact? It is soft-deleted and purged after two days."
+					>Delete</button>
+				}
+			</div>
+			@PrimaryButton("Save")
+		</div>
+	</form>
 }

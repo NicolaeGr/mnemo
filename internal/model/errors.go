@@ -10,4 +10,5 @@ var (
 	ErrFilenameRetired = errors.New("filename recently deleted")
 	ErrUsernameTaken   = errors.New("username taken")
 	ErrEmailTaken      = errors.New("email taken")
+	ErrInvalidTiers    = errors.New("a book needs at least one tier, and archived cannot be combined with primary or secondary")
 )

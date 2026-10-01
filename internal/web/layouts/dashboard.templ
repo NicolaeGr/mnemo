@@ -16,12 +16,8 @@ templ DashboardSegment(child templ.Component) {
 					>M</span>
 					<span class="font-semibold tracking-tight">mnemo</span>
 				</div>
-				<nav class="flex-1 space-y-1 p-3 text-sm">
-					@NavLink("/dashboard", "Overview")
-					@NavLink("/dashboard/books", "Books")
-					@NavLink("/dashboard/devices", "Devices")
-					@NavLink("/dashboard/contacts", "Contacts")
-					@NavLink("/dashboard/settings", "Settings")
+				<nav id="sidebar-nav" class="flex-1 space-y-1 p-3 text-sm">
+					@SidebarLinks()
 				</nav>
 				<div class="border-t border-border p-3">
 					<button
@@ -48,8 +44,9 @@ templ DashboardSegment(child templ.Component) {
 						<div class="my-1 border-t border-border"></div>
 						<a
 							href="/dashboard/settings"
-							hx-get="/dashboard/settings"
-							hx-push-url="true"
+							hx-get="/dashboard/settings/modal"
+							hx-target="#modal-root"
+							hx-swap="innerHTML"
 							class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-muted transition-colors"
 						>Settings</a>
 						<button
@@ -102,6 +99,21 @@ templ NavLink(href, label string) {
 		hx-push-url="true"
 		class={ "flex items-center gap-2 rounded-md px-3 py-2 transition-colors", navClass(seg.Path(ctx), href) }
 	>{ label }</a>
+}
+
+templ SidebarLinks() {
+	@NavLink("/dashboard", "Overview")
+	@NavLink("/dashboard/books", "Books")
+	@NavLink("/dashboard/devices", "Devices")
+	@NavLink("/dashboard/contacts", "Contacts")
+}
+
+// SidebarNavOOB refreshes the nav on fragment navigations, since the dashboard
+// segment that owns it is not re-rendered then and its active state would stick.
+templ SidebarNavOOB() {
+	<nav id="sidebar-nav" hx-swap-oob="outerHTML" class="flex-1 space-y-1 p-3 text-sm">
+		@SidebarLinks()
+	</nav>
 }
 
 func navClass(current, href string) string {

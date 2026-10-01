@@ -103,6 +103,33 @@ func TestBookOps(t *testing.T) {
 	}
 }
 
+func TestBookTierValidation(t *testing.T) {
+	pool := resetPool(t)
+	ctx := context.Background()
+
+	user, system, err := store.NewUsers(pool).Signup(ctx, "tieruser", "tier@example.com", "T", "pw", 4)
+	if err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	work, err := createBook(t, ctx, pool, user.ID, "work", "Work")
+	if err != nil {
+		t.Fatalf("create book: %v", err)
+	}
+
+	if err := setBookTiers(t, ctx, pool, user.ID, work.ID, []string{}); !errors.Is(err, model.ErrInvalidTiers) {
+		t.Fatalf("empty tiers err = %v, want ErrInvalidTiers", err)
+	}
+	if err := setBookTiers(t, ctx, pool, user.ID, work.ID, []string{"archived", "primary"}); !errors.Is(err, model.ErrInvalidTiers) {
+		t.Fatalf("mixed archived err = %v, want ErrInvalidTiers", err)
+	}
+	if err := setBookTiers(t, ctx, pool, user.ID, work.ID, []string{"archived"}); err != nil {
+		t.Fatalf("archived-only tiers err = %v, want nil", err)
+	}
+	if err := setBookTiers(t, ctx, pool, user.ID, system.ID, []string{"primary"}); !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("system tiers err = %v, want ErrConflict", err)
+	}
+}
+
 func createBook(t *testing.T, ctx context.Context, pool *pgxpool.Pool, userID int64, slug, name string) (store.Book, error) {
 	t.Helper()
 	actor := model.Actor{UserID: userID, Username: "bookuser"}

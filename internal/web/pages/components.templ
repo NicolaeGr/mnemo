@@ -1,0 +1,222 @@
+package pages
+
+import (
+	"encoding/json"
+	"strconv"
+)
+
+// SelectOption is one choice in a SelectField. The JSON tags matter: the
+// component is seeded into Alpine via JSON, which reads o.value / o.label.
+type SelectOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+func TierOptions() []SelectOption {
+	return []SelectOption{
+		{Value: "primary", Label: "primary"},
+		{Value: "secondary", Label: "secondary"},
+		{Value: "archived", Label: "archived"},
+	}
+}
+
+func countLabel(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return strconv.Itoa(n) + " " + noun + "s"
+}
+
+templ ErrorBanner(msg string) {
+	<p class="rounded-md border border-red-600/40 bg-red-600/10 px-3 py-2 text-sm text-red-600">{ msg }</p>
+}
+
+templ TextField(label, name, value, placeholder string, required bool) {
+	<div>
+		<label class="mb-1 block text-xs font-medium text-muted-foreground" for={ name }>{ label }</label>
+		<input
+			id={ name }
+			name={ name }
+			value={ value }
+			placeholder={ placeholder }
+			required?={ required }
+			class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"
+		/>
+	</div>
+}
+
+// SelectField is a styled listbox (Alpine) that mirrors the native select into
+// a hidden input, so htmx serialization keeps working.
+templ SelectField(label, name, selected string, options []SelectOption) {
+	<div class="relative" x-data={ selectData(selected, options) } @click.outside="open = false" @keydown.escape="open = false">
+		<label class="mb-1 block text-xs font-medium text-muted-foreground">{ label }</label>
+		<input type="hidden" name={ name } :value="value"/>
+		<button
+			type="button"
+			@click="open = !open"
+			class="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"
+		>
+			<span x-text="label"></span>
+			<svg class="h-4 w-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+		</button>
+		<div
+			x-show="open"
+			x-cloak
+			class="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-border bg-background py-1 shadow-lg"
+		>
+			<template x-for="o in options" :key="o.value">
+				<button
+					type="button"
+					@click="value = o.value; label = o.label; open = false"
+					class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+				>
+					<span x-text="o.label"></span>
+					<svg x-show="o.value === value" class="ml-auto h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>
+				</button>
+			</template>
+		</div>
+	</div>
+}
+
+// selectData seeds the Alpine component: current value/label, options, closed.
+func selectData(selected string, options []SelectOption) string {
+	label := ""
+	for _, o := range options {
+		if o.Value == selected {
+			label = o.Label
+		}
+	}
+	data, _ := json.Marshal(map[string]any{
+		"value":   selected,
+		"label":   label,
+		"options": options,
+		"open":    false,
+	})
+	return string(data)
+}
+
+// CheckRow is a styled checkbox with native semantics: it only submits when
+// checked, so multi-value groups (tiers, books) and the hidden-false + checked
+// pattern keep working. The check mark is a sibling of the input, so
+// peer-checked can drive it.
+templ CheckRow(name, value, label string, checked bool) {
+	<label class="flex cursor-pointer items-center gap-2 text-sm">
+		<span class="relative grid h-4 w-4 shrink-0 place-items-center">
+			<input
+				type="checkbox"
+				name={ name }
+				value={ value }
+				checked?={ checked }
+				class="peer h-4 w-4 appearance-none rounded border border-input bg-background transition-colors checked:border-accent checked:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			/>
+			<svg
+				class="pointer-events-none absolute h-3 w-3 text-accent-foreground opacity-0 peer-checked:opacity-100"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="3"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				aria-hidden="true"
+			><path d="M20 6 9 17l-5-5"></path></svg>
+		</span>
+		{ label }
+	</label>
+}
+
+templ PrimaryButton(label string) {
+	<button type="submit" class="inline-flex h-9 items-center rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90">{ label }</button>
+}
+
+templ DangerButton(label string) {
+	<button type="submit" class="inline-flex h-9 items-center rounded-md border border-red-600/40 px-3 text-sm text-red-600 transition-colors hover:bg-red-600/10">{ label }</button>
+}
+
+// MultiOption is one choice in a MultiSelect.
+type MultiOption struct {
+	Value int64  `json:"value"`
+	Label string `json:"label"`
+}
+
+func multiSelectData(options []MultiOption, selected []int64) string {
+	if options == nil {
+		options = []MultiOption{}
+	}
+	if selected == nil {
+		selected = []int64{}
+	}
+	data, _ := json.Marshal(map[string]any{"options": options, "selected": selected, "query": ""})
+	return string(data)
+}
+
+// MultiSelect is a chip + search picker. Options float over the content and only
+// appear once the user starts typing. The Alpine factory lives in app.js.
+templ MultiSelect(name, label string, options []MultiOption, selected []int64, hint string) {
+	<div x-data={ "multiSelect(" + multiSelectData(options, selected) + ")" } class="space-y-2">
+		<label class="block text-xs font-medium text-muted-foreground">{ label }</label>
+		<template x-for="id in selected" :key="id">
+			<input type="hidden" name={ name } :value="id"/>
+		</template>
+		<div class="flex flex-wrap gap-1" x-show="selected.length > 0">
+			<template x-for="id in selected" :key="id">
+				<span class="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs">
+					<span x-text="choiceLabel(id)"></span>
+					<button type="button" @click="remove(id)" class="text-muted-foreground transition-colors hover:text-foreground" title="Remove">
+						<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+					</button>
+				</span>
+			</template>
+		</div>
+		<div class="relative">
+			<input
+				type="text"
+				x-model="query"
+				placeholder="Search"
+				class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"
+			/>
+			<div
+				x-show="query.trim().length > 0 && filtered.length > 0"
+				x-cloak
+				class="absolute z-20 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-border bg-background py-1 shadow-lg"
+			>
+				<template x-for="o in filtered" :key="o.value">
+					<button type="button" @click="add(o.value)" class="block w-full px-3 py-2 text-left text-sm transition-colors hover:bg-muted" x-text="o.label"></button>
+				</template>
+			</div>
+		</div>
+		if hint != "" {
+			<p class="text-xs text-muted-foreground">{ hint }</p>
+		}
+	</div>
+}
+
+// PartMenu is a trigger with a native popover list of the not-yet-added items.
+// idExpr is a JS expression producing a unique id (address cards are repeated),
+// pick is the JS run on a chosen item, available is the JS list, class styles the
+// trigger.
+templ PartMenu(idExpr, pick, available, label, class string) {
+	<div x-data={ "popoverFor(" + idExpr + ")" } @mouseenter="show($el)" @mouseleave="hide()">
+		<button
+			type="button"
+			@click="show($el)"
+			aria-haspopup="true"
+			class={ class }
+		>{ label }</button>
+		<div
+			:id={ idExpr }
+			popover
+			@mouseenter="keep()"
+			@mouseleave="hide()"
+			class="menu-popover"
+		>
+			<template x-for={ "p in " + available } :key="p.id">
+				<button
+					type="button"
+					@click={ pick + "; close()" }
+					class="menu-item"
+					x-text="p.label"
+				></button>
+			</template>
+		</div>
+	</div>
+}

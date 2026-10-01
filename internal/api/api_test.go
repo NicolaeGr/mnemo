@@ -205,6 +205,94 @@ func TestContactCreateUpdate(t *testing.T) {
 	}
 }
 
+func TestContactStructuredInput(t *testing.T) {
+	pool := resetPool(t)
+	ctx := context.Background()
+	users := store.NewUsers(pool)
+	user, system, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4)
+	if err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	ts := httptest.NewServer(api.New(users, pool))
+	defer ts.Close()
+	base := ts.URL
+
+	if resp := call(t, ts, "POST", base+"/books", "", `{"slug":"work","display_name":"Work"}`); resp.Code != http.StatusCreated {
+		t.Fatalf("create book = %d: %s", resp.Code, resp.Body.String())
+	}
+	var bookID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM books WHERE owner_user_id = $1 AND slug = 'work'`, user.ID).Scan(&bookID); err != nil {
+		t.Fatalf("read book: %v", err)
+	}
+
+	// The structured shape mirrors the admin form: name parts, property rows,
+	// exploded addresses, and tags. Tags are the exact set, so tagging into work
+	// moves the card out of the system book.
+	in, _ := json.Marshal(map[string]any{
+		"name":      map[string]any{"given": "Alice", "family": "Smith"},
+		"fields":    []map[string]any{{"kind": "email", "type": "work", "value": "alice@example.com"}},
+		"addresses": []map[string]any{{"type": "work", "street": "1 Main St", "city": "Springfield"}},
+		"tags":      []int64{bookID},
+	})
+	created := call(t, ts, "POST", base+"/contacts", "", string(in))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create structured = %d: %s", created.Code, created.Body.String())
+	}
+	var out struct {
+		ID        int64  `json:"id"`
+		VCardText string `json:"vcard_text"`
+		Name      struct {
+			Given  string `json:"given"`
+			Family string `json:"family"`
+		} `json:"name"`
+		Addresses []struct {
+			Street string `json:"street"`
+		} `json:"addresses"`
+	}
+	decode(t, created, &out)
+	for _, want := range []string{"FN:Alice Smith", "N:Smith;Alice", "alice@example.com", "1 Main St"} {
+		if !strings.Contains(out.VCardText, want) {
+			t.Fatalf("structured vcard missing %q:\n%s", want, out.VCardText)
+		}
+	}
+	if out.Name.Given != "Alice" || out.Name.Family != "Smith" || len(out.Addresses) != 1 || out.Addresses[0].Street != "1 Main St" {
+		t.Fatalf("structured echo wrong: %+v", out)
+	}
+
+	var inWork, inSystem bool
+	if err := pool.QueryRow(ctx, `
+		SELECT
+		  EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $2),
+		  EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $3)`,
+		out.ID, bookID, system.ID).Scan(&inWork, &inSystem); err != nil {
+		t.Fatalf("read tags: %v", err)
+	}
+	if !inWork || inSystem {
+		t.Fatalf("tags = work:%v system:%v, want work only", inWork, inSystem)
+	}
+
+	// A structured PATCH replaces the editable fields over the stored identity,
+	// and leaves tags untouched when the body omits them.
+	patch, _ := json.Marshal(map[string]any{
+		"name":   map[string]any{"given": "Alice", "family": "Jones"},
+		"fields": []map[string]any{{"kind": "email", "type": "work", "value": "alice@example.com"}},
+	})
+	if resp := call(t, ts, "PATCH", base+"/contacts/"+strconv.FormatInt(out.ID, 10), "", string(patch)); resp.Code != http.StatusOK {
+		t.Fatalf("structured patch = %d: %s", resp.Code, resp.Body.String())
+	}
+	var after struct {
+		VCardText string `json:"vcard_text"`
+	}
+	decode(t, call(t, ts, "GET", base+"/contacts/"+strconv.FormatInt(out.ID, 10), "", ""), &after)
+	if !strings.Contains(after.VCardText, "FN:Alice Jones") || !strings.Contains(after.VCardText, "alice@example.com") {
+		t.Fatalf("patch produced wrong card:\n%s", after.VCardText)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $2)`, out.ID, bookID).Scan(&inWork); err != nil || !inWork {
+		t.Fatalf("patch dropped tags (inWork=%v err=%v)", inWork, err)
+	}
+}
+
 func TestAccountEndpoints(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()

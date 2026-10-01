@@ -9,49 +9,75 @@ import (
 
 templ SettingsPage(s uictx.Session, books []store.Book, defaultID *int64, errMsg string) {
 	<div class="mx-auto max-w-2xl space-y-8">
-		<div>
-			<h1 class="text-2xl font-bold tracking-tight">Settings</h1>
-			<p class="mt-1 text-sm text-muted-foreground">Your account.</p>
-		</div>
-		<div class="space-y-3">
-			@SettingRow("Username", s.Username)
-			@SettingRow("Name", s.Name)
-			@SettingRow("Email", s.Email)
-		</div>
-		@SettingsPanel(books, defaultID, errMsg)
+		<h1 class="text-xl font-semibold tracking-tight">Settings</h1>
+		@SettingsSections(s, books, defaultID, errMsg, "#settings-panel")
 	</div>
 }
 
+// SettingsModal is the same sections shown inside the modal opened from the user
+// menu; its form targets the modal container so saves stay in place.
+templ SettingsModal(s uictx.Session, books []store.Book, defaultID *int64, errMsg string) {
+	@SettingsSections(s, books, defaultID, errMsg, "#settings-modal-panel")
+}
+
+templ SettingsSections(s uictx.Session, books []store.Book, defaultID *int64, errMsg, target string) {
+	<section class="space-y-3">
+		<h2 class="text-sm font-semibold">Account</h2>
+		@SettingRow("Username", s.Username)
+		@SettingRow("Name", s.Name)
+		@SettingRow("Email", s.Email)
+	</section>
+	<section class="space-y-3">
+		<h2 class="text-sm font-semibold">Sync defaults</h2>
+		<div id={ settingsPanelID(target) }>
+			@SettingsBookForm(books, defaultID, errMsg, target)
+		</div>
+	</section>
+}
+
+templ SettingsBookForm(books []store.Book, defaultID *int64, errMsg, target string) {
+	<form hx-post="/dashboard/settings" hx-target={ target } hx-swap="innerHTML" class="space-y-3">
+		<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+		<input type="hidden" name="target" value={ target }/>
+		if errMsg != "" {
+			@ErrorBanner(errMsg)
+		}
+		<div class="max-w-xs">
+			@SelectField("Default book", "default_book_id", defaultBookValue(defaultID), activeBookOptions(books))
+		</div>
+		<div class="flex justify-end">
+			@PrimaryButton("Save")
+		</div>
+	</form>
+}
+
 templ SettingRow(label, value string) {
-	<div class="flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-5 py-4">
+	<div class="flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-4 py-3">
 		<p class="text-sm font-medium">{ label }</p>
 		<p class="text-sm text-muted-foreground">{ value }</p>
 	</div>
 }
 
-templ SettingsPanel(books []store.Book, defaultID *int64, errMsg string) {
-	<div id="settings-panel" class="space-y-3">
-		if errMsg != "" {
-			<p class="rounded-md border border-red-600/40 bg-red-600/10 px-3 py-2 text-sm text-red-600">{ errMsg }</p>
+func settingsPanelID(target string) string {
+	if target == "#settings-modal-panel" {
+		return "settings-modal-panel"
+	}
+	return "settings-panel"
+}
+
+func defaultBookValue(id *int64) string {
+	if id == nil {
+		return ""
+	}
+	return strconv.FormatInt(*id, 10)
+}
+
+func activeBookOptions(books []store.Book) []SelectOption {
+	out := make([]SelectOption, 0, len(books))
+	for _, b := range books {
+		if b.IsActive {
+			out = append(out, SelectOption{Value: strconv.FormatInt(b.ID, 10), Label: b.DisplayName})
 		}
-		<form
-			hx-post="/dashboard/settings"
-			hx-target="#settings-panel"
-			hx-swap="outerHTML"
-			class="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-background p-4"
-		>
-			<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-			<div class="space-y-1.5">
-				<label class="text-xs font-medium text-muted-foreground" for="default_book_id">Default book</label>
-				<select id="default_book_id" name="default_book_id" class="rounded-md border border-input bg-background px-3 py-2 text-sm">
-					for _, b := range books {
-						if b.IsActive {
-							<option value={ strconv.FormatInt(b.ID, 10) } selected?={ defaultID != nil && *defaultID == b.ID }>{ b.DisplayName }</option>
-						}
-					}
-				</select>
-			</div>
-			<button type="submit" class="btn btn-secondary px-3 py-2 text-sm">Save</button>
-		</form>
-	</div>
+	}
+	return out
 }

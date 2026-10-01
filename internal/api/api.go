@@ -20,6 +20,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/nicolaegr/mnemo/internal/auth"
+	"github.com/nicolaegr/mnemo/internal/contact"
 	"github.com/nicolaegr/mnemo/internal/model"
 	"github.com/nicolaegr/mnemo/internal/store"
 	vcardmeta "github.com/nicolaegr/mnemo/internal/vcard"
@@ -231,11 +232,25 @@ func (a *api) deleteBook(w http.ResponseWriter, r *http.Request) {
 }
 
 type fullContactOut struct {
-	ID        int64  `json:"id"`
-	UID       string `json:"uid"`
-	Filename  string `json:"filename"`
-	ETag      string `json:"etag"`
-	VCardText string `json:"vcard_text"`
+	ID        int64             `json:"id"`
+	UID       string            `json:"uid"`
+	Filename  string            `json:"filename"`
+	ETag      string            `json:"etag"`
+	VCardText string            `json:"vcard_text"`
+	Name      contact.Name      `json:"name"`
+	Fields    []contact.Field   `json:"fields"`
+	Addresses []contact.Address `json:"addresses"`
+}
+
+// fullContact projects a stored card into both shapes: the raw vcard and the
+// structured form the admin UI edits.
+func fullContact(c store.Contact) fullContactOut {
+	card, _ := vcard.NewDecoder(strings.NewReader(c.VCardText)).Decode()
+	form := contact.Parse(card)
+	return fullContactOut{
+		ID: c.ID, UID: c.UID, Filename: c.Filename, ETag: c.ETag, VCardText: c.VCardText,
+		Name: form.Name, Fields: form.Fields, Addresses: form.Addresses,
+	}
 }
 
 // getContact returns one live contact including its raw vcard.
@@ -255,19 +270,42 @@ func (a *api) getContact(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		out = fullContactOut{c.ID, c.UID, c.Filename, c.ETag, c.VCardText}
+		out = fullContact(c)
 		return nil
 	})
 	writeJSON(w, 200, out, err)
 }
 
 type contactIn struct {
-	VCard string  `json:"vcard"`
-	Tags  []int64 `json:"tags"`
+	VCard     string            `json:"vcard"`
+	Name      contact.Name      `json:"name"`
+	Fields    []contact.Field   `json:"fields"`
+	Addresses []contact.Address `json:"addresses"`
+	Tags      []int64           `json:"tags"`
 }
 
-// createContact stores a new card under a server-generated filename, defaulting
-// to the system book unless tags are given.
+func (in contactIn) form() contact.Form {
+	return contact.Form{Name: in.Name, Fields: in.Fields, Addresses: in.Addresses}
+}
+
+// cardFromIn renders the body into a card: a raw vcard when given, otherwise the
+// structured form built over base. A body with neither is a precondition failure.
+func cardFromIn(base vcard.Card, in contactIn) (vcard.Card, error) {
+	if strings.TrimSpace(in.VCard) != "" {
+		card, err := parseVCard(in.VCard)
+		if err != nil {
+			return nil, model.ErrPrecondition
+		}
+		return card, nil
+	}
+	if in.form().Empty() {
+		return nil, model.ErrPrecondition
+	}
+	return contact.Build(base, in.form())
+}
+
+// createContact stores a new card under a server-generated filename, tagging into
+// the system book unless tags are given.
 func (a *api) createContact(w http.ResponseWriter, r *http.Request) {
 	actor, err := a.actor(r)
 	if err != nil {
@@ -279,9 +317,9 @@ func (a *api) createContact(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	card, err := parseVCard(body.VCard)
+	card, err := cardFromIn(vcard.Card{}, body)
 	if err != nil {
-		writeErr(w, model.ErrPrecondition)
+		writeErr(w, err)
 		return
 	}
 	vcardmeta.EnsureFormattedName(card)
@@ -312,18 +350,19 @@ func (a *api) createContact(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if len(body.Tags) > 0 {
-			if err := s.Retag(r.Context(), c.ID, body.Tags, nil); err != nil {
+		if body.Tags != nil {
+			if err := s.SetContactBooks(r.Context(), c.ID, body.Tags); err != nil {
 				return err
 			}
 		}
-		out = fullContactOut{c.ID, c.UID, c.Filename, c.ETag, c.VCardText}
+		out = fullContact(c)
 		return nil
 	})
 	writeJSON(w, 201, out, err)
 }
 
-// updateContact replaces an existing contact's card.
+// updateContact replaces an existing contact's editable fields, keeping its
+// identity and binary properties (photo, logo, uid) from the stored card.
 func (a *api) updateContact(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(w, r)
 	if err != nil {
@@ -334,26 +373,8 @@ func (a *api) updateContact(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var body struct {
-		VCard string `json:"vcard"`
-	}
+	var body contactIn
 	if err := decodeJSON(r, &body); err != nil {
-		writeErr(w, err)
-		return
-	}
-	card, err := parseVCard(body.VCard)
-	if err != nil {
-		writeErr(w, model.ErrPrecondition)
-		return
-	}
-	vcardmeta.EnsureFormattedName(card)
-	text := vcardmeta.CanonicalText(card)
-	if text == "" {
-		writeErr(w, model.ErrPrecondition)
-		return
-	}
-	meta, err := json.Marshal(vcardmeta.SearchMeta(card))
-	if err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -367,6 +388,20 @@ func (a *api) updateContact(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		base, _ := vcard.NewDecoder(strings.NewReader(c.VCardText)).Decode()
+		card, err := cardFromIn(base, body)
+		if err != nil {
+			return err
+		}
+		vcardmeta.EnsureFormattedName(card)
+		text := vcardmeta.CanonicalText(card)
+		if text == "" {
+			return model.ErrPrecondition
+		}
+		meta, err := json.Marshal(vcardmeta.SearchMeta(card))
+		if err != nil {
+			return err
+		}
 		uid := vcardmeta.DeriveUID(card, c.Filename)
 		if _, err := s.PutContact(r.Context(), store.PutContactParams{
 			Filename: c.Filename, UID: uid, VCardText: text, SearchMeta: meta,
@@ -377,7 +412,12 @@ func (a *api) updateContact(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		out = fullContactOut{updated.ID, updated.UID, updated.Filename, updated.ETag, updated.VCardText}
+		if body.Tags != nil {
+			if err := s.SetContactBooks(r.Context(), updated.ID, body.Tags); err != nil {
+				return err
+			}
+		}
+		out = fullContact(updated)
 		return nil
 	})
 	writeJSON(w, 200, out, err)
@@ -811,7 +851,8 @@ func writeErr(w http.ResponseWriter, err error) {
 		errors.Is(err, model.ErrUsernameTaken),
 		errors.Is(err, model.ErrEmailTaken):
 		status, code = http.StatusConflict, "conflict"
-	case errors.Is(err, model.ErrPrecondition):
+	case errors.Is(err, model.ErrPrecondition),
+		errors.Is(err, model.ErrInvalidTiers):
 		status, code = http.StatusBadRequest, "bad_request"
 	}
 	var body errBody

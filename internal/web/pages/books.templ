@@ -1,119 +1,209 @@
 package pages
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"github.com/nicolaegr/mnemo/internal/store"
 	"github.com/nicolaegr/mnemo/internal/web/uictx"
 )
 
+// defaultTiers matches the books.synced_tiers column default, so a new book
+// starts where the schema would put it.
+var defaultTiers = []string{"primary", "secondary"}
+
 var allTiers = []string{"primary", "secondary", "archived"}
 
+templ BooksPage(books []store.Book, errMsg string) {
+	<div class="space-y-6">
+		<div class="flex items-center justify-between gap-4">
+			<div>
+				<h1 class="text-xl font-semibold tracking-tight">Books</h1>
+				<p class="text-xs text-muted-foreground">{ countLabel(len(books), "book") }</p>
+			</div>
+			<button
+				type="button"
+				class="inline-flex h-9 items-center rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90"
+				hx-get="/dashboard/books/new"
+				hx-target="#modal-root"
+				hx-swap="innerHTML"
+			>Add book</button>
+		</div>
+		@BookList(books, errMsg)
+	</div>
+}
+
 templ BookList(books []store.Book, errMsg string) {
-	<div id="books-list" class="space-y-6">
+	<div id="books-list" class="space-y-3">
 		if errMsg != "" {
-			<p class="rounded-md border border-red-600/40 bg-red-600/10 px-3 py-2 text-sm text-red-600">{ errMsg }</p>
+			@ErrorBanner(errMsg)
 		}
-		<form
-			hx-post="/dashboard/books"
-			hx-target="#books-list"
-			hx-swap="outerHTML"
-			class="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-background p-4"
-		>
-			<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-			<div class="space-y-1.5">
-				<label class="text-xs font-medium text-muted-foreground" for="slug">Slug</label>
-				<input id="slug" name="slug" required placeholder="work" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
-			</div>
-			<div class="space-y-1.5">
-				<label class="text-xs font-medium text-muted-foreground" for="display_name">Name</label>
-				<input id="display_name" name="display_name" required placeholder="Work" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
-			</div>
-			<button type="submit" class="btn btn-secondary bg-accent text-accent-foreground px-3 py-2 text-sm">Add book</button>
-		</form>
 		if len(books) == 0 {
 			<p class="text-sm text-muted-foreground">No books yet.</p>
 		} else {
-			<div class="space-y-4">
-				for _, b := range books {
-					@BookCard(b)
-				}
-			</div>
+			for _, b := range books {
+				@BookCard(b)
+			}
 		}
 	</div>
 }
 
 templ BookCard(b store.Book) {
-	<div class="rounded-lg border border-border bg-background p-4">
-		<div class="flex flex-wrap items-center gap-2">
-			<span class="font-medium">{ b.DisplayName }</span>
-			<span class="text-xs text-muted-foreground">{ b.Slug }</span>
-			if b.IsSystem {
-				<span class="rounded-full bg-muted px-2 py-0.5 text-xs">system</span>
-			}
-			if !b.IsActive {
-				<span class="rounded-full bg-red-600/10 px-2 py-0.5 text-xs text-red-600">inactive</span>
-			}
-		</div>
-		<form
-			hx-post={ "/dashboard/books/" + strconv.FormatInt(b.ID, 10) + "/rename" }
-			hx-target="#books-list"
-			hx-swap="outerHTML"
-			class="mt-3 flex flex-wrap items-end gap-3"
-		>
-			<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-			<div class="space-y-1.5">
-				<label class="text-xs font-medium text-muted-foreground">Name</label>
-				<input name="display_name" value={ b.DisplayName } class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
-			</div>
-			<div class="min-w-56 flex-1 space-y-1.5">
-				<label class="text-xs font-medium text-muted-foreground">Description</label>
-				<input name="description" value={ bookDescription(b) } class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"/>
-			</div>
-			<button type="submit" class="btn btn-secondary px-3 py-2 text-sm">Save</button>
-		</form>
-		<div class="mt-3 flex flex-wrap items-end gap-3">
-			<form
-				hx-post={ "/dashboard/books/" + strconv.FormatInt(b.ID, 10) + "/tiers" }
-				hx-target="#books-list"
-				hx-swap="outerHTML"
-				class="flex items-center gap-3"
-			>
-				<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-				<span class="text-xs font-medium text-muted-foreground">Tiers</span>
-				for _, tier := range allTiers {
-					<label class="flex items-center gap-1.5 text-sm">
-						<input type="checkbox" name="tiers" value={ tier } checked?={ hasTier(b.SyncedTiers, tier) }/>
-						{ tier }
-					</label>
+	<div class="flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-4 py-3">
+		<div class="min-w-0">
+			<div class="flex flex-wrap items-center gap-2">
+				<span class="font-medium">{ b.DisplayName }</span>
+				<span class="text-xs text-muted-foreground">{ b.Slug }</span>
+				if b.IsSystem {
+					<span class="rounded-full bg-muted px-2 py-0.5 text-xs">system</span>
 				}
-				<button type="submit" class="btn btn-secondary px-3 py-1.5 text-xs">Save tiers</button>
-			</form>
-			if !b.IsSystem {
-				<form hx-post={ "/dashboard/books/" + strconv.FormatInt(b.ID, 10) + "/active" } hx-target="#books-list" hx-swap="outerHTML">
-					<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-					<input type="hidden" name="active" value={ strconv.FormatBool(!b.IsActive) }/>
-					<button type="submit" class="btn btn-secondary px-3 py-1.5 text-xs">{ activeLabel(b.IsActive) }</button>
-				</form>
-				<form
-					hx-post={ "/dashboard/books/" + strconv.FormatInt(b.ID, 10) + "/delete" }
-					hx-target="#books-list"
-					hx-swap="outerHTML"
-					hx-confirm="Delete this book? Its contacts stay, retagged onto the system book."
-				>
-					<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-					<button type="submit" class="btn btn-secondary px-3 py-1.5 text-xs text-red-600">Delete</button>
-				</form>
-			}
+				if !b.IsActive {
+					<span class="rounded-full bg-red-600/10 px-2 py-0.5 text-xs text-red-600">inactive</span>
+				}
+			</div>
+			<div class="mt-1 flex flex-wrap gap-1">
+				for _, t := range b.SyncedTiers {
+					<span class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{ t }</span>
+				}
+			</div>
+		</div>
+		<button
+			type="button"
+			class="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted"
+			hx-get={ "/dashboard/books/" + strconv.FormatInt(b.ID, 10) + "/edit" }
+			hx-target="#modal-root"
+			hx-swap="innerHTML"
+		>Edit</button>
+	</div>
+}
+
+// BookForm renders the add (b == nil) or edit form inside a modal. Submitting
+// refreshes #books-list and the response clears the modal.
+templ BookForm(b *store.Book) {
+	<form hx-post={ bookFormAction(b) } hx-target="#books-list" hx-swap="outerHTML" class="space-y-4">
+		<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+		if b == nil {
+			@BookIdentity("")
+		} else {
+			@TextField("Name", "display_name", b.DisplayName, "Work", true)
+			<div>
+				<label class="mb-1 block text-xs font-medium text-muted-foreground" for="slug">Slug</label>
+				<input
+					id="slug"
+					type="text"
+					value={ b.Slug }
+					disabled
+					class="h-9 w-full rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground"
+				/>
+			</div>
+		}
+		@TextField("Description", "description", bookDescription(b), "", false)
+		if b != nil && b.IsSystem {
+			<div>
+				<p class="mb-1 text-xs font-medium text-muted-foreground">Synced tiers</p>
+				<div class="flex flex-wrap gap-1">
+					for _, t := range b.SyncedTiers {
+						<span class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{ t }</span>
+					}
+				</div>
+				<p class="mt-1 text-xs text-muted-foreground">The system book always stays visible to primary and secondary devices.</p>
+			</div>
+		} else {
+			<fieldset>
+				<legend class="mb-1 text-xs font-medium text-muted-foreground">Synced tiers</legend>
+				<div class="flex flex-wrap gap-4">
+					for _, tier := range allTiers {
+						@CheckRow("tiers", tier, tier, hasTier(bookTiers(b), tier))
+					}
+				</div>
+				<p class="mt-1 text-xs text-muted-foreground">Pick at least one; archived can't be combined with primary or secondary.</p>
+			</fieldset>
+		}
+		if b != nil && !b.IsSystem {
+			<input type="hidden" name="active" value="false"/>
+			@CheckRow("active", "true", "Active", b.IsActive)
+		}
+		<div class="flex items-center justify-between gap-2 pt-2">
+			<div>
+				if b != nil && !b.IsSystem {
+					<button
+						type="submit"
+						class="inline-flex h-9 items-center rounded-md border border-red-600/40 px-3 text-sm text-red-600 transition-colors hover:bg-red-600/10"
+						hx-post={ "/dashboard/books/" + strconv.FormatInt(b.ID, 10) + "/delete" }
+						hx-target="#books-list"
+						hx-swap="outerHTML"
+						hx-confirm="Delete this book? Its contacts stay, retagged onto the system book."
+					>Delete</button>
+				}
+			</div>
+			@PrimaryButton("Save")
+		</div>
+	</form>
+}
+
+// BookIdentity is the add form's name + slug pair: the slug follows the name
+// until it is edited by hand, and a taken auto slug gets digits appended.
+templ BookIdentity(name string) {
+	<div x-data={ "slugField(" + slugData(name) + ")" } class="space-y-4">
+		<div>
+			<label class="mb-1 block text-xs font-medium text-muted-foreground" for="display_name">Name</label>
+			<input
+				id="display_name"
+				name="display_name"
+				x-model="name"
+				@input.debounce.300ms="onName()"
+				placeholder="Work"
+				required
+				class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"
+			/>
+		</div>
+		<div>
+			<label class="mb-1 block text-xs font-medium text-muted-foreground" for="slug">Slug</label>
+			<input
+				id="slug"
+				name="slug"
+				x-model="slug"
+				@input.debounce.300ms="check()"
+				placeholder="work"
+				required
+				class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"
+			/>
+			<p class="mt-1 h-4 text-xs">
+				<span x-show="status === 'taken'" x-cloak class="text-red-600">already used</span>
+				<span x-show="status === 'checking'" x-cloak class="text-muted-foreground">checking…</span>
+			</p>
 		</div>
 	</div>
 }
 
-func bookDescription(b store.Book) string {
-	if b.Description == nil {
+func slugData(name string) string {
+	data, _ := json.Marshal(map[string]any{
+		"endpoint": "/dashboard/books/slug",
+		"name":     name,
+		"slug":     "",
+	})
+	return string(data)
+}
+
+func bookFormAction(b *store.Book) string {
+	if b == nil {
+		return "/dashboard/books"
+	}
+	return "/dashboard/books/" + strconv.FormatInt(b.ID, 10) + "/edit"
+}
+
+func bookDescription(b *store.Book) string {
+	if b == nil || b.Description == nil {
 		return ""
 	}
 	return *b.Description
+}
+
+func bookTiers(b *store.Book) []string {
+	if b == nil {
+		return defaultTiers
+	}
+	return b.SyncedTiers
 }
 
 func hasTier(tiers []string, want string) bool {
@@ -123,11 +213,4 @@ func hasTier(tiers []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func activeLabel(active bool) string {
-	if active {
-		return "Deactivate"
-	}
-	return "Activate"
 }

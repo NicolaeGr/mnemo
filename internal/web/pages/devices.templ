@@ -14,125 +14,118 @@ type DeviceView struct {
 	Overrides map[int64]bool
 }
 
-templ DeviceList(devices []DeviceView, books []store.Book, newToken, errMsg string) {
-	<div id="devices-list" class="space-y-6">
+templ DevicesPage(devices []DeviceView, errMsg string) {
+	<div class="space-y-6">
+		<div class="flex items-center justify-between gap-4">
+			<div>
+				<h1 class="text-xl font-semibold tracking-tight">Devices</h1>
+				<p class="text-xs text-muted-foreground">{ countLabel(len(devices), "device") }</p>
+			</div>
+			<button
+				type="button"
+				class="inline-flex h-9 items-center rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90"
+				hx-get="/dashboard/devices/new"
+				hx-target="#modal-root"
+				hx-swap="innerHTML"
+			>Add device</button>
+		</div>
+		<div id="devices-notice"></div>
+		@DeviceList(devices, errMsg)
+	</div>
+}
+
+templ DeviceList(devices []DeviceView, errMsg string) {
+	<div id="devices-list" class="space-y-3">
 		if errMsg != "" {
-			<p class="rounded-md border border-red-600/40 bg-red-600/10 px-3 py-2 text-sm text-red-600">{ errMsg }</p>
+			@ErrorBanner(errMsg)
 		}
-		if newToken != "" {
-			<div class="rounded-lg border border-border bg-muted p-4">
-				<p class="text-sm font-medium">New device token</p>
-				<p class="mt-1 text-xs text-muted-foreground">Copy it now; it is shown only once.</p>
-				<code class="mt-2 block break-all rounded-md bg-background px-3 py-2 text-sm">{ newToken }</code>
-			</div>
-		}
-		<form
-			hx-post="/dashboard/devices"
-			hx-target="#devices-list"
-			hx-swap="outerHTML"
-			class="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-background p-4"
-		>
-			<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-			<div class="space-y-1.5">
-				<label class="text-xs font-medium text-muted-foreground">Label</label>
-				<input name="label" required placeholder="My phone" class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
-			</div>
-			<div class="space-y-1.5">
-				<label class="text-xs font-medium text-muted-foreground">Tier</label>
-				@TierSelect("tier", "primary")
-			</div>
-			<button type="submit" class="btn btn-secondary bg-accent text-accent-foreground px-3 py-2 text-sm">Add device</button>
-		</form>
 		if len(devices) == 0 {
 			<p class="text-sm text-muted-foreground">No devices yet.</p>
 		} else {
-			<div class="space-y-4">
-				for _, d := range devices {
-					@DeviceCard(d, books)
-				}
-			</div>
+			for _, d := range devices {
+				@DeviceCard(d)
+			}
 		}
 	</div>
 }
 
-templ DeviceCard(d DeviceView, books []store.Book) {
-	<div class="rounded-lg border border-border bg-background p-4">
-		<div class="flex flex-wrap items-center gap-2">
-			<span class="font-medium">{ d.Principal.Label }</span>
-			<span class="rounded-full bg-muted px-2 py-0.5 text-xs">{ d.Principal.Tier }</span>
-			<span class="text-xs text-muted-foreground">last sync: { lastSeen(d.Principal) }</span>
+templ DeviceCard(d DeviceView) {
+	<div class="flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-4 py-3">
+		<div class="min-w-0">
+			<div class="flex flex-wrap items-center gap-2">
+				<span class="font-medium">{ d.Principal.Label }</span>
+				<span class="rounded-full bg-muted px-2 py-0.5 text-xs">{ d.Principal.Tier }</span>
+			</div>
+			<p class="mt-1 text-xs text-muted-foreground">last sync: { lastSeen(d.Principal) }</p>
 		</div>
-		<div class="mt-3 flex flex-wrap items-end gap-3">
-			<form
-				hx-post={ "/dashboard/devices/" + strconv.FormatInt(d.Principal.ID, 10) + "/rename" }
-				hx-target="#devices-list"
-				hx-swap="outerHTML"
-				class="flex items-end gap-2"
-			>
-				<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-				<div class="space-y-1.5">
-					<label class="text-xs font-medium text-muted-foreground">Label</label>
-					<input name="label" value={ d.Principal.Label } class="rounded-md border border-input bg-background px-3 py-2 text-sm"/>
-				</div>
-				<button type="submit" class="btn btn-secondary px-3 py-2 text-sm">Rename</button>
-			</form>
-			<form
-				hx-post={ "/dashboard/devices/" + strconv.FormatInt(d.Principal.ID, 10) + "/tier" }
-				hx-target="#devices-list"
-				hx-swap="outerHTML"
-				class="flex items-end gap-2"
-			>
-				<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-				<div class="space-y-1.5">
-					<label class="text-xs font-medium text-muted-foreground">Tier</label>
-					@TierSelect("tier", d.Principal.Tier)
-				</div>
-				<button type="submit" class="btn btn-secondary px-3 py-2 text-sm">Save tier</button>
-			</form>
-			<form
+		<button
+			type="button"
+			class="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted"
+			hx-get={ "/dashboard/devices/" + strconv.FormatInt(d.Principal.ID, 10) + "/edit" }
+			hx-target="#modal-root"
+			hx-swap="innerHTML"
+		>Edit</button>
+	</div>
+}
+
+// DeviceAddForm is the create form; the response shows the token once in the
+// notice area and closes the modal.
+templ DeviceAddForm() {
+	<form hx-post="/dashboard/devices" hx-target="#devices-list" hx-swap="outerHTML" class="space-y-4">
+		<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+		@TextField("Label", "label", "", "My phone", true)
+		@SelectField("Tier", "tier", "primary", TierOptions())
+		<div class="flex justify-end pt-2">
+			@PrimaryButton("Add device")
+		</div>
+	</form>
+}
+
+// DeviceForm is the edit form.
+templ DeviceForm(d DeviceView, books []store.Book) {
+	<form hx-post={ "/dashboard/devices/" + strconv.FormatInt(d.Principal.ID, 10) + "/edit" } hx-target="#devices-list" hx-swap="outerHTML" class="space-y-4">
+		<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+		@TextField("Label", "label", d.Principal.Label, "", true)
+		@SelectField("Tier", "tier", d.Principal.Tier, TierOptions())
+		@MultiSelect("hide", "Hidden books (this device only)", bookOptions(books), hiddenBookIDs(d.Overrides, books), "Books this device should not sync.")
+		<div class="flex items-center justify-between gap-2 pt-2">
+			<button
+				type="submit"
+				class="inline-flex h-9 items-center rounded-md border border-red-600/40 px-3 text-sm text-red-600 transition-colors hover:bg-red-600/10"
 				hx-post={ "/dashboard/devices/" + strconv.FormatInt(d.Principal.ID, 10) + "/delete" }
 				hx-target="#devices-list"
 				hx-swap="outerHTML"
 				hx-confirm="Revoke this device? Its token stops working immediately."
-			>
-				<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-				<button type="submit" class="btn btn-secondary px-3 py-2 text-sm text-red-600">Revoke</button>
-			</form>
+			>Revoke</button>
+			@PrimaryButton("Save")
 		</div>
-		<form
-			hx-post={ "/dashboard/devices/" + strconv.FormatInt(d.Principal.ID, 10) + "/overrides" }
-			hx-target="#devices-list"
-			hx-swap="outerHTML"
-			class="mt-4 space-y-2 border-t border-border pt-3"
-		>
-			<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-			<p class="text-xs font-medium text-muted-foreground">Hidden books (this device only)</p>
-			if len(books) == 0 {
-				<p class="text-sm text-muted-foreground">No books.</p>
-			} else {
-				for _, b := range books {
-					<label class="flex items-center gap-2 text-sm">
-						<input type="checkbox" name="hide" value={ strconv.FormatInt(b.ID, 10) } checked?={ hidesBook(d.Overrides, b.ID) }/>
-						{ b.DisplayName }
-					</label>
-				}
-				<button type="submit" class="btn btn-secondary px-3 py-1.5 text-xs">Save visibility</button>
-			}
-		</form>
-	</div>
+	</form>
 }
 
-templ TierSelect(name, current string) {
-	<select name={ name } class="rounded-md border border-input bg-background px-3 py-2 text-sm">
-		for _, tier := range allTiers {
-			<option value={ tier } selected?={ tier == current }>{ tier }</option>
-		}
-	</select>
+// TokenNoticeOOB swaps the freshly minted token into the page notice area.
+templ TokenNoticeOOB(token string) {
+	<div id="devices-notice" hx-swap-oob="innerHTML">
+		<div class="rounded-lg border border-border bg-muted p-4">
+			<p class="text-sm font-medium">New device token</p>
+			<p class="mt-1 text-xs text-muted-foreground">Copy it now; it is shown only once.</p>
+			<code class="mt-2 block break-all rounded-md bg-background px-3 py-2 text-sm">{ token }</code>
+		</div>
+	</div>
 }
 
 func hidesBook(overrides map[int64]bool, bookID int64) bool {
 	enabled, ok := overrides[bookID]
 	return ok && !enabled
+}
+
+func hiddenBookIDs(overrides map[int64]bool, books []store.Book) []int64 {
+	out := make([]int64, 0)
+	for _, b := range books {
+		if hidesBook(overrides, b.ID) {
+			out = append(out, b.ID)
+		}
+	}
+	return out
 }
 
 func lastSeen(p store.Principal) string {

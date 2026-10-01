@@ -10,10 +10,10 @@ import (
 )
 
 // Retag applies add/remove of the actor's own book tags to a live contact.
-// Removing the system book is ignored; the system book is re-added when
-// nothing would remain. No change rows are written, but the sync_epoch of every
-// principal whose visibility of the card changed is bumped. Caller holds
-// LockSync.
+// Removing any book is allowed, including the system book; if nothing remains the
+// set is repaired to the system book (I1). No change rows are written, but the
+// sync_epoch of every principal whose visibility of the card changed is bumped.
+// Caller holds LockSync.
 func (s ScopedStore) Retag(ctx context.Context, contactID int64, addBookIDs, removeBookIDs []int64) error {
 	var one int
 	err := s.Tx.QueryRow(ctx, `
@@ -56,6 +56,29 @@ func (s ScopedStore) Retag(ctx context.Context, contactID int64, addBookIDs, rem
 	return err
 }
 
+// SetContactBooks makes the live contact's tag set exactly want, diffing against
+// the current set so a no-op save writes nothing. Caller holds LockSync.
+func (s ScopedStore) SetContactBooks(ctx context.Context, contactID int64, want []int64) error {
+	current, err := s.tagSet(ctx, contactID)
+	if err != nil {
+		return err
+	}
+	wantSet := make(map[int64]struct{}, len(want))
+	var add, remove []int64
+	for _, id := range want {
+		wantSet[id] = struct{}{}
+		if _, ok := current[id]; !ok {
+			add = append(add, id)
+		}
+	}
+	for id := range current {
+		if _, ok := wantSet[id]; !ok {
+			remove = append(remove, id)
+		}
+	}
+	return s.Retag(ctx, contactID, add, remove)
+}
+
 // tagSet returns the live contact's current book ids.
 func (s ScopedStore) tagSet(ctx context.Context, contactID int64) (map[int64]struct{}, error) {
 	rows, err := s.Tx.Query(ctx, `
@@ -92,9 +115,7 @@ func applyRetag(before map[int64]struct{}, systemID int64, active []Book, addIDs
 		}
 	}
 	for _, id := range removeIDs {
-		if id != systemID { // detaching the system book is ignored
-			delete(after, id)
-		}
+		delete(after, id)
 	}
 	if len(after) == 0 {
 		after[systemID] = struct{}{} // I1 repair
