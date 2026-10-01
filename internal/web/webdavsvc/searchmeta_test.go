@@ -65,9 +65,12 @@ func TestSearchMetaShape(t *testing.T) {
 	if meta["fn"] != "John Doe" {
 		t.Fatalf("fn = %v, want John Doe", meta["fn"])
 	}
+	if meta["uid"] != "urn:uuid:meta-1" {
+		t.Fatalf("uid = %v, want urn:uuid:meta-1", meta["uid"])
+	}
 	norms, _ := meta["tel_norm"].([]any)
-	if len(norms) != 1 || norms[0] != "15550100" {
-		t.Fatalf("tel_norm = %v, want [15550100]", meta["tel_norm"])
+	if len(norms) != 1 || norms[0] != "+15550100" {
+		t.Fatalf("tel_norm = %v, want [+15550100]", meta["tel_norm"])
 	}
 
 	// Phone search matches digits; name search matches the derived FN.

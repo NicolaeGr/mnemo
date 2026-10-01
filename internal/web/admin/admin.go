@@ -612,12 +612,14 @@ func (a *Admin) putNewContact(r *http.Request, form contact.Form) error {
 	if err != nil {
 		return err
 	}
+	filename := newFilename()
+	vcardmeta.EnsureFormattedName(card)
+	uid := vcardmeta.EnsureUID(card, filename)
+	text := vcardmeta.CanonicalText(card)
 	meta, err := json.Marshal(vcardmeta.SearchMeta(card))
 	if err != nil {
 		return err
 	}
-	filename := newFilename()
-	uid := vcardmeta.DeriveUID(card, filename)
 	desired, err := a.desiredBooks(r)
 	if err != nil {
 		return err
@@ -627,7 +629,7 @@ func (a *Admin) putNewContact(r *http.Request, form contact.Form) error {
 			return err
 		}
 		if _, err := s.PutContact(r.Context(), store.PutContactParams{
-			Filename: filename, UID: uid, VCardText: vcardmeta.CanonicalText(card), SearchMeta: meta,
+			Filename: filename, UID: uid, VCardText: text, SearchMeta: meta,
 		}, store.Precondition{}); err != nil {
 			return err
 		}
@@ -666,14 +668,17 @@ func (a *Admin) editContact(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		vcardmeta.EnsureFormattedName(card)
+		uid := vcardmeta.EnsureUID(card, c.Filename)
+		text := vcardmeta.CanonicalText(card)
 		meta, err := json.Marshal(vcardmeta.SearchMeta(card))
 		if err != nil {
 			return err
 		}
 		if _, err := s.PutContact(r.Context(), store.PutContactParams{
 			Filename:   c.Filename,
-			UID:        vcardmeta.DeriveUID(card, c.Filename),
-			VCardText:  vcardmeta.CanonicalText(card),
+			UID:        uid,
+			VCardText:  text,
 			SearchMeta: meta,
 		}, store.Precondition{}); err != nil {
 			return err

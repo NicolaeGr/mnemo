@@ -322,7 +322,9 @@ func (a *api) createContact(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	filename := uuidFilename()
 	vcardmeta.EnsureFormattedName(card)
+	uid := vcardmeta.EnsureUID(card, filename)
 	text := vcardmeta.CanonicalText(card)
 	if text == "" {
 		writeErr(w, model.ErrPrecondition)
@@ -333,8 +335,6 @@ func (a *api) createContact(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	filename := uuidFilename()
-	uid := vcardmeta.DeriveUID(card, filename)
 
 	var out fullContactOut
 	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
@@ -394,6 +394,7 @@ func (a *api) updateContact(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		vcardmeta.EnsureFormattedName(card)
+		uid := vcardmeta.EnsureUID(card, c.Filename)
 		text := vcardmeta.CanonicalText(card)
 		if text == "" {
 			return model.ErrPrecondition
@@ -402,7 +403,6 @@ func (a *api) updateContact(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		uid := vcardmeta.DeriveUID(card, c.Filename)
 		if _, err := s.PutContact(r.Context(), store.PutContactParams{
 			Filename: c.Filename, UID: uid, VCardText: text, SearchMeta: meta,
 		}, store.Precondition{}); err != nil {

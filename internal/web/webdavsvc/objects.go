@@ -138,6 +138,7 @@ func (b *backend) PutAddressObject(ctx context.Context, p string, card vcard.Car
 	}
 
 	vcardmeta.EnsureFormattedName(card)
+	uid := vcardmeta.EnsureUID(card, objPath)
 	text := vcardmeta.CanonicalText(card)
 	meta, err := json.Marshal(vcardmeta.SearchMeta(card))
 	if err != nil {
@@ -155,7 +156,7 @@ func (b *backend) PutAddressObject(ctx context.Context, p string, card vcard.Car
 		}
 		res, err = s.PutContact(ctx, store.PutContactParams{
 			Filename:   objPath,
-			UID:        vcardmeta.DeriveUID(card, objPath),
+			UID:        uid,
 			VCardText:  text,
 			SearchMeta: meta,
 		}, cond)
