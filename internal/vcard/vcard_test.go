@@ -1,6 +1,8 @@
 package vcard_test
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/emersion/go-vcard"
@@ -23,6 +25,81 @@ func TestEnsureUID(t *testing.T) {
 	}
 }
 
+func TestFromRawPreservesClientBytes(t *testing.T) {
+	raw := "BEGIN:VCARD\r\n" +
+		"VERSION:3.0\r\n" +
+		"UID:urn:uuid:abc\r\n" +
+		"FN:Jane Doe\r\n" +
+		"X-CUSTOM;FOO=bar:keep me\r\n" +
+		"EMAIL;TYPE=work:jane@example.com\r\n" +
+		"END:VCARD\r\n"
+
+	text, uid, meta, err := vcardmeta.FromRaw(raw, "abc.vcf")
+	if err != nil {
+		t.Fatalf("FromRaw: %v", err)
+	}
+	if uid != "urn:uuid:abc" {
+		t.Fatalf("uid = %q, want the client's UID", uid)
+	}
+	if strings.Contains(text, "\r") {
+		t.Fatalf("CRs not stripped:\n%q", text)
+	}
+	// Unknown properties and parameter order must survive verbatim.
+	for _, want := range []string{"X-CUSTOM;FOO=bar:keep me", "EMAIL;TYPE=work:jane@example.com"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("stored body lost %q:\n%s", want, text)
+		}
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(meta, &m); err != nil {
+		t.Fatalf("meta json: %v", err)
+	}
+	if m["fn"] != "Jane Doe" {
+		t.Fatalf("search fn = %v, want Jane Doe", m["fn"])
+	}
+}
+
+func TestFromRawSplicesMissingFNAndUID(t *testing.T) {
+	text, uid, _, err := vcardmeta.FromRaw("BEGIN:VCARD\r\nVERSION:3.0\r\nEND:VCARD\r\n", "9f2a.vcf")
+	if err != nil {
+		t.Fatalf("FromRaw: %v", err)
+	}
+	if uid != "9f2a" {
+		t.Fatalf("derived uid = %q, want 9f2a", uid)
+	}
+	if !strings.Contains(text, "UID:9f2a") {
+		t.Fatalf("missing UID splice:\n%s", text)
+	}
+	if !strings.Contains(text, "FN:") {
+		t.Fatalf("missing FN splice:\n%s", text)
+	}
+	if strings.Index(text, "UID:9f2a") > strings.Index(text, "END:VCARD") {
+		t.Fatalf("spliced property landed after END:VCARD:\n%s", text)
+	}
+}
+
+func TestFromRawReFoldsOverlongLines(t *testing.T) {
+	long := strings.Repeat("a", 200)
+	raw := "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:u\r\nFN:" + long + "\r\nEND:VCARD\r\n"
+	text, _, _, err := vcardmeta.FromRaw(raw, "u.vcf")
+	if err != nil {
+		t.Fatalf("FromRaw: %v", err)
+	}
+	for _, l := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		if len(l) > 75 {
+			t.Fatalf("line of %d octets not folded: %q", len(l), l)
+		}
+	}
+	// Re-parsing the folded body must recover the original value.
+	card, err := vcard.NewDecoder(strings.NewReader(text)).Decode()
+	if err != nil {
+		t.Fatalf("re-decode: %v", err)
+	}
+	if got := card.Value(vcard.FieldFormattedName); got != long {
+		t.Fatalf("FN round-trip = %d chars, want %d", len(got), len(long))
+	}
+}
 func TestNormalizePhone(t *testing.T) {
 	cases := map[string]string{
 		"+1 (555) 0100":  "+15550100",

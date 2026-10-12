@@ -7,7 +7,7 @@ devices can be shown different slices without any of them knowing.
 
 ## Running
 
-The dev environment is devenv (Postgres + Redis).
+The dev environment is devenv (Postgres).
 
 ```sh
 devenv shell
@@ -106,5 +106,14 @@ code differs, it is listed here rather than left implicit.
   `/api/v1/session/login`; the UI logs in at `/login`.
 - **Module names.** `internal/store` (not `storage`) and `internal/web/webdavsvc`
   (not `internal/dav`); the dispatcher sits in `internal/jobs`.
+- **Epoch bumps.** §5.6's primitive bumped every affected principal to one
+  global `MAX(sync_epoch)+1`, a cross-user contention point. The shipped bump
+  advances `sync_epoch` by one per bumped principal. An epoch is only ever
+  compared per principal, so values need not agree across principals; the
+  invariant that matters (I5, strictly increasing per principal) still holds.
+- **`seg` cache.** The segment cache and its `Cache`/TTL machinery were removed
+  rather than carried as dead weight: the only loader reads per-session request
+  context, so caching never applied (no TTL was set) and every request ran the
+  loader anyway.
 
 Not yet done: sharing and groups (a later phase).

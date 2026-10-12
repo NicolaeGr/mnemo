@@ -23,7 +23,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	st, err := store.Open(ctx, cfg.DatabaseURL, cfg.RedisAddr)
+	st, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("connect: %v", err)
 	}

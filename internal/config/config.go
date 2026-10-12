@@ -9,7 +9,6 @@ type Config struct {
 	Addr string
 
 	DatabaseURL string
-	RedisAddr   string
 
 	SessionName    string
 	SessionTTL     time.Duration
@@ -24,7 +23,6 @@ func Load() Config {
 	return Config{
 		Addr:           getenv("ADDR", ":8080"),
 		DatabaseURL:    databaseURL(),
-		RedisAddr:      getenv("REDIS_ADDR", "127.0.0.1:6379"),
 		SessionName:    getenv("SESSION_NAME", "session"),
 		SessionTTL:     72 * time.Hour,
 		SessionSecret:  os.Getenv("SESSION_SECRET"),

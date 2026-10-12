@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +44,60 @@ func TestForceResyncEvent(t *testing.T) {
 	}
 	if dispatchedAt == nil {
 		t.Fatal("event not marked dispatched")
+	}
+}
+
+// TestClaimEventsAreExclusive proves the claim lease makes the outbox safe with
+// more than one dispatcher worker: concurrent claimers must partition the rows,
+// never hand the same event to two workers (invariant I8's precondition).
+func TestClaimEventsAreExclusive(t *testing.T) {
+	pool := resetPool(t)
+	ctx := context.Background()
+
+	user, _, err := store.NewUsers(pool).Signup(ctx, "leasuser", "lease@example.com", "Lease", "pw", 4)
+	if err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	const total = 24
+	for i := 0; i < total; i++ {
+		if err := store.EnqueueEvent(ctx, pool, user.ID, "force_resync", map[string]any{}, nil); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+	}
+
+	var mu sync.Mutex
+	seen := make(map[int64]int)
+	var wg sync.WaitGroup
+	for w := 0; w < 4; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				batch, err := store.ClaimEvents(ctx, pool, 5)
+				if err != nil {
+					t.Errorf("claim: %v", err)
+					return
+				}
+				if len(batch) == 0 {
+					return
+				}
+				mu.Lock()
+				for _, e := range batch {
+					seen[e.ID]++
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if len(seen) != total {
+		t.Fatalf("claimed %d distinct events, want %d", len(seen), total)
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Fatalf("event %d claimed %d times, want exactly 1", id, n)
+		}
 	}
 }
 

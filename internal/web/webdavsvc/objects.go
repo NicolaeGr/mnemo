@@ -19,6 +19,20 @@ import (
 	vcardmeta "github.com/nicolaegr/mnemo/internal/vcard"
 )
 
+// rawBodyKey carries the raw request body of a PUT so PutAddressObject can store
+// a byte-level normalization of what the client sent instead of a structural
+// re-encode of the card the go-webdav handler parsed for us.
+type rawBodyKey struct{}
+
+func withRawBody(ctx context.Context, b []byte) context.Context {
+	return context.WithValue(ctx, rawBodyKey{}, b)
+}
+
+func rawBody(ctx context.Context) ([]byte, bool) {
+	b, ok := ctx.Value(rawBodyKey{}).([]byte)
+	return b, ok
+}
+
 func (b *backend) GetAddressObject(ctx context.Context, p string, _ *carddav.AddressDataRequest) (*carddav.AddressObject, error) {
 	objPath, ok := b.pathSuffix(ctx, p)
 	if !ok || objPath == "" {
@@ -83,12 +97,31 @@ func (b *backend) ListAddressObjects(ctx context.Context, p string, _ *carddav.A
 		return nil, err
 	}
 	objects := make([]carddav.AddressObject, 0)
+	wantData := wantsCards(ctx)
 	err = store.WithTx(ctx, b.pool, a, func(s store.ScopedStore) error {
 		visible, err := resolve.Resolver{}.VisibleBooks(ctx, s)
 		if err != nil {
 			return err
 		}
-		contacts, err := s.ListContactsInBooks(ctx, visibleIDs(visible))
+		ids := visibleIDs(visible)
+		if !wantData {
+			// The caller established this listing needs no card bodies (an
+			// etag-only depth-1 PROPFIND), so skip loading and decoding every
+			// body: SELECT filename, etag, updated_at.
+			refs, err := s.ListVisibleObjectRefs(ctx, ids)
+			if err != nil {
+				return err
+			}
+			for _, r := range refs {
+				objects = append(objects, carddav.AddressObject{
+					Path:    path.Join(abPath, r.Filename),
+					ModTime: r.UpdatedAt,
+					ETag:    r.ETag,
+				})
+			}
+			return nil
+		}
+		contacts, err := s.ListContactsInBooks(ctx, ids)
 		if err != nil {
 			return err
 		}
@@ -113,11 +146,10 @@ func (b *backend) ListAddressObjects(ctx context.Context, p string, _ *carddav.A
 }
 
 func (b *backend) QueryAddressObjects(ctx context.Context, p string, query *carddav.AddressBookQuery) ([]carddav.AddressObject, error) {
-	var dataReq carddav.AddressDataRequest
-	if query != nil {
-		dataReq = query.DataRequest
-	}
-	objects, err := b.ListAddressObjects(ctx, p, &dataReq)
+	// Query results may carry address-data, and the caller's filters are applied
+	// to decoded cards, so the listing always carries bodies here. wantsCards is
+	// only ever cleared for the depth-1 PROPFIND listing.
+	objects, err := b.ListAddressObjects(ctx, p, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -139,15 +171,26 @@ func (b *backend) PutAddressObject(ctx context.Context, p string, card vcard.Car
 
 	vcardmeta.EnsureFormattedName(card)
 	uid := vcardmeta.EnsureUID(card, objPath)
-	text := vcardmeta.CanonicalText(card)
-	if text == "" {
-		// CanonicalText returns "" only on an encoder error. Reject the request
-		// rather than store an empty body with the empty etag.
-		return nil, webdav.NewHTTPError(http.StatusBadRequest, nil)
-	}
-	meta, err := json.Marshal(vcardmeta.SearchMeta(card))
-	if err != nil {
-		return nil, fmt.Errorf("marshal search meta: %w", err)
+
+	var text string
+	var meta []byte
+	if raw, ok := rawBody(ctx); ok {
+		// Byte-level canonicalization of the client's own bytes; FN/UID are
+		// spliced in only when the client omitted them.
+		text, uid, meta, err = vcardmeta.FromRaw(string(raw), objPath)
+		if err != nil {
+			return nil, webdav.NewHTTPError(http.StatusBadRequest, err)
+		}
+	} else {
+		// No raw body captured (defensive: the filter always supplies one).
+		text = vcardmeta.CanonicalText(card)
+		if text == "" {
+			return nil, webdav.NewHTTPError(http.StatusBadRequest, nil)
+		}
+		meta, err = json.Marshal(vcardmeta.SearchMeta(card))
+		if err != nil {
+			return nil, fmt.Errorf("marshal search meta: %w", err)
+		}
 	}
 	cond, err := putPrecondition(opts)
 	if err != nil {

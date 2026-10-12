@@ -16,6 +16,50 @@ import (
 	"github.com/nicolaegr/mnemo/internal/store"
 )
 
+// wantsCardsKey carries, for a depth-1 PROPFIND, whether the response will render
+// card bodies. It is unset (and therefore true) for every other request.
+type wantsCardsKey struct{}
+
+func withWantsCards(ctx context.Context, v bool) context.Context {
+	return context.WithValue(ctx, wantsCardsKey{}, v)
+}
+
+// wantsCards reports whether card bodies must be produced for this request. The
+// default is true: a wrongly omitted Card is a 500, so only a request we can
+// positively read as etag-only is served without them.
+func wantsCards(ctx context.Context) bool {
+	v, ok := ctx.Value(wantsCardsKey{}).(bool)
+	if !ok {
+		return true
+	}
+	return v
+}
+
+// propfindWantsCards reports whether a PROPFIND body will make the go-webdav
+// handler render card bodies. The library passes the backend an empty data
+// request for listings and renders Card only when address-data is asked for, so
+// the body is the only reliable signal. Only an explicit <prop> list that omits
+// address-data (and is neither allprop nor propname) is answered without bodies.
+func propfindWantsCards(body []byte) bool {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return true
+	}
+	var pf struct {
+		Prop *struct {
+			AddressData *struct{} `xml:"urn:ietf:params:xml:ns:carddav address-data"`
+		} `xml:"DAV: prop"`
+		AllProp  *struct{} `xml:"DAV: allprop"`
+		PropName *struct{} `xml:"DAV: propname"`
+	}
+	if err := xml.Unmarshal(body, &pf); err != nil {
+		return true
+	}
+	if pf.Prop == nil || pf.AllProp != nil || pf.PropName != nil {
+		return true
+	}
+	return pf.Prop.AddressData != nil
+}
+
 // The go-webdav carddav.Handler serves sync-collection only on its client, not
 // its server, and its address-book PROPFIND carries no getctag. This filter
 // answers those two on the address-book collection and passes every other
@@ -32,12 +76,36 @@ func (f *davFilter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ab := strings.TrimSuffix(addressBookPath(actor.Username), "/")
+	if r.Method == "PUT" {
+		// Capture the raw body so the write path can canonicalize the client's
+		// bytes in place (unknown properties and parameter order survive) rather
+		// than re-encoding the library's parsed card. Replay it for the library.
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "read body", http.StatusBadRequest)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		f.next.ServeHTTP(w, r.WithContext(withRawBody(r.Context(), raw)))
+		return
+	}
 	if strings.TrimSuffix(r.URL.Path, "/") != ab {
 		f.next.ServeHTTP(w, r)
 		return
 	}
-	if r.Method == "PROPFIND" && r.Header.Get("Depth") == "0" {
-		handleBookProp(w, r, f.b, actor)
+	if r.Method == "PROPFIND" {
+		if r.Header.Get("Depth") == "0" {
+			handleBookProp(w, r, f.b, actor)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "read body", http.StatusBadRequest)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		r = r.WithContext(withWantsCards(r.Context(), propfindWantsCards(body)))
+		f.next.ServeHTTP(w, r)
 		return
 	}
 	if r.Method == "REPORT" {

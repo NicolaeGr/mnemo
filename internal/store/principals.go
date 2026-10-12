@@ -126,18 +126,19 @@ func TokenHashOf(token string) string {
 	return sha256Hex(token)
 }
 
-// BumpPrincipalsEpoch atomically advances sync_epoch for the given principal
-// ids inside the current tx (caller holds the sync lock). Returns the new
-// epoch value.
+// BumpPrincipalsEpoch advances sync_epoch for the given principal ids inside the
+// current tx (caller holds the sync lock). Each bumped principal's epoch strictly
+// increases (I5); the increment is per-principal rather than a global
+// MAX(sync_epoch)+1 so a bump never contends with other users' rows. Epochs are
+// only ever compared per principal, so they need not agree across principals.
 func BumpPrincipalsEpoch(ctx context.Context, tx pgx.Tx, ids []int64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
 	var newEpoch int64
 	err := tx.QueryRow(ctx, `
-		UPDATE principals SET sync_epoch =
-			COALESCE((SELECT MAX(sync_epoch) FROM principals) + 1, 1)
-		WHERE id = ANY($1)
+		UPDATE principals SET sync_epoch = sync_epoch + 1
+		 WHERE id = ANY($1)
 		RETURNING sync_epoch`, ids).Scan(&newEpoch)
 	return newEpoch, err
 }

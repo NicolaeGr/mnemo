@@ -329,16 +329,9 @@ func (a *api) createContact(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	vcardmeta.EnsureFormattedName(card)
-	uid := vcardmeta.EnsureUID(card, filename)
-	text := vcardmeta.CanonicalText(card)
-	if text == "" {
-		writeErr(w, model.ErrPrecondition)
-		return
-	}
-	meta, err := json.Marshal(vcardmeta.SearchMeta(card))
+	text, uid, meta, err := vcardmeta.Prepare(card, filename)
 	if err != nil {
-		writeErr(w, err)
+		writeErr(w, model.ErrPrecondition)
 		return
 	}
 
@@ -347,19 +340,11 @@ func (a *api) createContact(w http.ResponseWriter, r *http.Request) {
 		if err := store.LockSync(r.Context(), s.Tx, actor.UserID); err != nil {
 			return err
 		}
-		if _, err := s.PutContact(r.Context(), store.PutContactParams{
+		c, err := s.SaveContact(r.Context(), store.PutContactParams{
 			Filename: filename, UID: uid, VCardText: text, SearchMeta: meta,
-		}, store.Precondition{}); err != nil {
-			return err
-		}
-		c, err := s.LiveContactByFilename(r.Context(), filename)
+		}, store.Precondition{}, body.Tags)
 		if err != nil {
 			return err
-		}
-		if body.Tags != nil {
-			if err := s.SetContactBooks(r.Context(), c.ID, body.Tags); err != nil {
-				return err
-			}
 		}
 		out = fullContact(c)
 		return nil
@@ -399,29 +384,15 @@ func (a *api) updateContact(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		vcardmeta.EnsureFormattedName(card)
-		uid := vcardmeta.EnsureUID(card, c.Filename)
-		text := vcardmeta.CanonicalText(card)
-		if text == "" {
+		text, uid, meta, err := vcardmeta.Prepare(card, c.Filename)
+		if err != nil {
 			return model.ErrPrecondition
 		}
-		meta, err := json.Marshal(vcardmeta.SearchMeta(card))
-		if err != nil {
-			return err
-		}
-		if _, err := s.PutContact(r.Context(), store.PutContactParams{
+		updated, err := s.SaveContact(r.Context(), store.PutContactParams{
 			Filename: c.Filename, UID: uid, VCardText: text, SearchMeta: meta,
-		}, store.Precondition{}); err != nil {
-			return err
-		}
-		updated, err := s.LiveContactByFilename(r.Context(), c.Filename)
+		}, store.Precondition{}, body.Tags)
 		if err != nil {
 			return err
-		}
-		if body.Tags != nil {
-			if err := s.SetContactBooks(r.Context(), updated.ID, body.Tags); err != nil {
-				return err
-			}
 		}
 		out = fullContact(updated)
 		return nil

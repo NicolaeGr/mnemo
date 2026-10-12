@@ -17,7 +17,6 @@
   env.GOMODCACHE = "/home/nicolae/.cache/go-template/pkg/mod";
 
   services.postgres.enable = true;
-  services.redis.enable = true;
 
   enterShell = ''
     echo "Devenv environment loaded!"

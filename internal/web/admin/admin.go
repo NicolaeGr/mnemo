@@ -630,10 +630,7 @@ func (a *Admin) putNewContact(r *http.Request, form contact.Form) error {
 	if err != nil {
 		return err
 	}
-	vcardmeta.EnsureFormattedName(card)
-	uid := vcardmeta.EnsureUID(card, filename)
-	text := vcardmeta.CanonicalText(card)
-	meta, err := json.Marshal(vcardmeta.SearchMeta(card))
+	text, uid, meta, err := vcardmeta.Prepare(card, filename)
 	if err != nil {
 		return err
 	}
@@ -645,16 +642,10 @@ func (a *Admin) putNewContact(r *http.Request, form contact.Form) error {
 		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
 			return err
 		}
-		if _, err := s.PutContact(r.Context(), store.PutContactParams{
+		_, err := s.SaveContact(r.Context(), store.PutContactParams{
 			Filename: filename, UID: uid, VCardText: text, SearchMeta: meta,
-		}, store.Precondition{}); err != nil {
-			return err
-		}
-		c, err := s.LiveContactByFilename(r.Context(), filename)
-		if err != nil {
-			return err
-		}
-		return s.SetContactBooks(r.Context(), c.ID, desired)
+		}, store.Precondition{}, desired)
+		return err
 	})
 }
 
@@ -685,22 +676,17 @@ func (a *Admin) editContact(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		vcardmeta.EnsureFormattedName(card)
-		uid := vcardmeta.EnsureUID(card, c.Filename)
-		text := vcardmeta.CanonicalText(card)
-		meta, err := json.Marshal(vcardmeta.SearchMeta(card))
+		text, uid, meta, err := vcardmeta.Prepare(card, c.Filename)
 		if err != nil {
 			return err
 		}
-		if _, err := s.PutContact(r.Context(), store.PutContactParams{
+		_, err = s.SaveContact(r.Context(), store.PutContactParams{
 			Filename:   c.Filename,
 			UID:        uid,
 			VCardText:  text,
 			SearchMeta: meta,
-		}, store.Precondition{}); err != nil {
-			return err
-		}
-		return s.SetContactBooks(r.Context(), id, desired)
+		}, store.Precondition{}, desired)
+		return err
 	})
 	a.renderContactList(w, r, err)
 }

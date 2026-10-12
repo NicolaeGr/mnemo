@@ -89,6 +89,43 @@ func (s ScopedStore) ListContactsInBooks(ctx context.Context, bookIDs []int64) (
 	return contacts, rows.Err()
 }
 
+// ObjectRef is a card's CardDAV identity without its body: enough to answer a
+// listing or etag-only PROPFIND without loading or decoding every card.
+type ObjectRef struct {
+	Filename  string
+	ETag      string
+	UpdatedAt time.Time
+}
+
+// ListVisibleObjectRefs returns live contacts tagged in at least one of the
+// given books, as {filename, etag, updated_at} only. Empty book set means
+// nothing is visible.
+func (s ScopedStore) ListVisibleObjectRefs(ctx context.Context, bookIDs []int64) ([]ObjectRef, error) {
+	if len(bookIDs) == 0 {
+		return []ObjectRef{}, nil
+	}
+	rows, err := s.Tx.Query(ctx, `
+		SELECT DISTINCT c.filename, c.etag, c.updated_at
+		  FROM contacts c
+		  JOIN contact_books cb ON cb.contact_id = c.id
+		 WHERE c.user_id = $1 AND c.deleted_at IS NULL AND cb.book_id = ANY($2)
+		 ORDER BY c.filename`, s.Actor.UserID, bookIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	refs := make([]ObjectRef, 0)
+	for rows.Next() {
+		var r ObjectRef
+		if err := rows.Scan(&r.Filename, &r.ETag, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		refs = append(refs, r)
+	}
+	return refs, rows.Err()
+}
+
 // ContactBookIDs returns the books a contact is tagged in, verified to be the
 // actor's own contact.
 func (s ScopedStore) ContactBookIDs(ctx context.Context, contactID int64) ([]int64, error) {
@@ -280,6 +317,27 @@ func (s ScopedStore) tagSystemBook(ctx context.Context, contactID int64) error {
 		INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)
 		ON CONFLICT DO NOTHING`, contactID, bookID)
 	return err
+}
+
+// SaveContact writes a card and applies its tag set, returning the stored row.
+// It is the single write sequence the REST and admin planes share, so the two
+// cannot drift. tags == nil leaves tagging alone (a create keeps its system-book
+// default, an update keeps existing tags); tags != nil sets the exact book set,
+// repaired to the system book when empty (I1). Caller holds LockSync.
+func (s ScopedStore) SaveContact(ctx context.Context, p PutContactParams, cond Precondition, tags []int64) (Contact, error) {
+	if _, err := s.PutContact(ctx, p, cond); err != nil {
+		return Contact{}, err
+	}
+	c, err := s.LiveContactByFilename(ctx, p.Filename)
+	if err != nil {
+		return Contact{}, err
+	}
+	if tags != nil {
+		if err := s.SetContactBooks(ctx, c.ID, tags); err != nil {
+			return Contact{}, err
+		}
+	}
+	return c, nil
 }
 
 // DeleteContact soft-deletes a contact and appends a 'delete' change.

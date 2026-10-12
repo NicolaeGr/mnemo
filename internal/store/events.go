@@ -39,20 +39,35 @@ const (
 	maxAttempts = 5
 	// backoffCap bounds the exponential retry delay.
 	backoffCap = time.Hour
+	// leaseDuration is how long a claimed event stays unavailable to other
+	// dispatcher workers. It must exceed the time to apply one event (seconds);
+	// it only needs to elapse on its own if a worker dies mid-claim.
+	leaseDuration = 30 * time.Second
 )
 
-// ClaimEvents claims a batch of pending events that are due (not yet dispatched,
-// not dead-lettered, past any backoff): FOR UPDATE SKIP LOCKED.
+// ClaimEvents claims a batch of due, unclaimed events in a single atomic
+// statement: the same statement selects candidates FOR UPDATE SKIP LOCKED and
+// stamps leased_until, so concurrent workers cannot both claim a row. A claimed
+// event is unavailable until it is dispatched, its lease expires, or a failure
+// clears the lease. The lease is what makes this safe with N workers.
 func ClaimEvents(ctx context.Context, pool *pgxpool.Pool, limit int) ([]Event, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT id, target_user_id, kind, payload, initiated_by, created_at, dispatched_at
-		  FROM user_events
-		 WHERE dispatched_at IS NULL
-		   AND NOT dead_letter
-		   AND next_attempt_at <= now()
-		 ORDER BY id
-		 LIMIT $1
-		 FOR UPDATE SKIP LOCKED`, limit)
+		WITH due AS (
+			SELECT id FROM user_events
+			 WHERE dispatched_at IS NULL
+			   AND NOT dead_letter
+			   AND next_attempt_at <= now()
+			   AND (leased_until IS NULL OR leased_until < now())
+			 ORDER BY id
+			 LIMIT $1
+			 FOR UPDATE SKIP LOCKED
+		)
+		UPDATE user_events e
+		   SET leased_until = now() + $2::interval
+		  FROM due
+		 WHERE e.id = due.id
+		RETURNING e.id, e.target_user_id, e.kind, e.payload, e.initiated_by,
+		          e.created_at, e.dispatched_at`, limit, leaseDuration.String())
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +104,7 @@ func ApplyEvent(ctx context.Context, pool *pgxpool.Pool, e Event) error {
 			return fmt.Errorf("dispatch: unknown event kind %q", e.Kind)
 		}
 		_, err := s.Tx.Exec(ctx, `
-			UPDATE user_events SET dispatched_at = now()
+			UPDATE user_events SET dispatched_at = now(), leased_until = NULL
 			 WHERE id = $1 AND dispatched_at IS NULL`, e.ID)
 		return err
 	})
@@ -111,7 +126,7 @@ func RecordFailure(ctx context.Context, pool *pgxpool.Pool, id int64) error {
 	attempts++
 	if attempts >= maxAttempts {
 		_, err := pool.Exec(ctx, `
-			UPDATE user_events SET attempts = $2, dead_letter = true
+			UPDATE user_events SET attempts = $2, dead_letter = true, leased_until = NULL
 			 WHERE id = $1 AND dispatched_at IS NULL`, id, attempts)
 		return err
 	}
@@ -120,7 +135,7 @@ func RecordFailure(ctx context.Context, pool *pgxpool.Pool, id int64) error {
 		delay = backoffCap
 	}
 	_, err := pool.Exec(ctx, `
-		UPDATE user_events SET attempts = $2, next_attempt_at = now() + $3::interval
+		UPDATE user_events SET attempts = $2, next_attempt_at = now() + $3::interval, leased_until = NULL
 		 WHERE id = $1 AND dispatched_at IS NULL`, id, attempts, delay.String())
 	return err
 }
