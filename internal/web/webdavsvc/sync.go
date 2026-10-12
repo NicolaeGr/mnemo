@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"strconv"
@@ -81,13 +82,19 @@ func handleBookProp(w http.ResponseWriter, r *http.Request, b *backend, actor au
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Use the same display name the library's PROPFIND reports (addressBook), so
+	// both paths agree.
+	displayName := actor.Username
+	if u, err := b.users.ByID(r.Context(), actor.UserID); err == nil && u.Name != "" {
+		displayName = u.Name
+	}
 	body := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav" xmlns:cs="http://calendarserver.org/ns/">
  <d:response>
   <d:href>%s</d:href>
   <d:propstat>
    <d:prop>
-    <d:displayname>Contacts</d:displayname>
+    <d:displayname>%s</d:displayname>
     <d:resourcetype><c:addressbook/></d:resourcetype>
     <d:sync-token>%s</d:sync-token>
     <cs:getctag>%s</cs:getctag>
@@ -100,7 +107,7 @@ func handleBookProp(w http.ResponseWriter, r *http.Request, b *backend, actor au
    <d:status>HTTP/1.1 200 OK</d:status>
   </d:propstat>
  </d:response>
-</d:multistatus>`, r.URL.Path, ctag, ctag)
+</d:multistatus>`, r.URL.Path, html.EscapeString(displayName), ctag, ctag)
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.WriteHeader(http.StatusMultiStatus)
 	_, _ = w.Write([]byte(body))

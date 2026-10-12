@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -23,7 +24,9 @@ var (
 // _test.go files; each package passes one fixed suffix.
 func URL(suffix string) (string, error) {
 	once.Do(func() {
-		host := env("PGHOST", "/run/user/1000/devenv-386ec41/postgres")
+		// Read PGHOST instead of a fixed socket path; devenv sets it to its own
+		// runtime directory. When unset, libpq uses the default socket.
+		host := os.Getenv("PGHOST")
 		port := env("PGPORT", "5432")
 		user := env("PGUSER", os.Getenv("USER"))
 		base := env("PGDATABASE", os.Getenv("USER"))
@@ -56,7 +59,12 @@ func ensure(host, port, user, base, target string) (string, error) {
 }
 
 func dsn(host, port, user, db string) string {
-	return "host=" + host + " port=" + port + " user=" + user + " dbname=" + db + " sslmode=disable"
+	parts := make([]string, 0, 5)
+	if host != "" {
+		parts = append(parts, "host="+host)
+	}
+	parts = append(parts, "port="+port, "user="+user, "dbname="+db, "sslmode=disable")
+	return strings.Join(parts, " ")
 }
 
 func env(k, def string) string {

@@ -253,10 +253,14 @@ func (s ScopedStore) SetPrincipalTier(ctx context.Context, principalID int64, ti
 	if err := s.requirePrincipal(ctx, principalID); err != nil {
 		return err
 	}
-	if _, err := s.Tx.Exec(ctx, `
-		UPDATE principals SET tier = $3 WHERE id = $1 AND user_id = $2`,
-		principalID, s.Actor.UserID, tier); err != nil {
+	tag, err := s.Tx.Exec(ctx, `
+		UPDATE principals SET tier = $3 WHERE id = $1 AND user_id = $2 AND tier <> $3`,
+		principalID, s.Actor.UserID, tier)
+	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil // an unchanged tier changes nothing a device syncs
 	}
 	return s.bumpPrincipals(ctx, []int64{principalID})
 }

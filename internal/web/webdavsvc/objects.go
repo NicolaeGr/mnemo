@@ -140,6 +140,11 @@ func (b *backend) PutAddressObject(ctx context.Context, p string, card vcard.Car
 	vcardmeta.EnsureFormattedName(card)
 	uid := vcardmeta.EnsureUID(card, objPath)
 	text := vcardmeta.CanonicalText(card)
+	if text == "" {
+		// CanonicalText returns "" only on an encoder error. Reject the request
+		// rather than store an empty body with the empty etag.
+		return nil, webdav.NewHTTPError(http.StatusBadRequest, nil)
+	}
 	meta, err := json.Marshal(vcardmeta.SearchMeta(card))
 	if err != nil {
 		return nil, fmt.Errorf("marshal search meta: %w", err)
@@ -152,6 +157,9 @@ func (b *backend) PutAddressObject(ctx context.Context, p string, card vcard.Car
 	var res store.PutResult
 	txErr := store.WithTx(ctx, b.pool, a, func(s store.ScopedStore) error {
 		if err := store.LockSync(ctx, s.Tx, a.UserID); err != nil {
+			return err
+		}
+		if err := b.ensureVisible(ctx, s, objPath); err != nil {
 			return err
 		}
 		res, err = s.PutContact(ctx, store.PutContactParams{
@@ -192,14 +200,47 @@ func (b *backend) DeleteAddressObject(ctx context.Context, p string) error {
 		if err := store.LockSync(ctx, s.Tx, a.UserID); err != nil {
 			return err
 		}
+		if err := b.ensureVisible(ctx, s, objPath); err != nil {
+			return err
+		}
 		deleted, err = s.DeleteContact(ctx, objPath)
 		return err
 	})
+	if errors.Is(err, model.ErrNotFound) {
+		return b.notFound()
+	}
 	if err != nil {
 		return err
 	}
 	if !deleted {
 		return b.notFound()
+	}
+	return nil
+}
+
+// ensureVisible returns ErrNotFound when a live contact with this filename
+// exists but the actor cannot see it. C2.4 makes an invisible card behave like a
+// missing one, so PUT and DELETE call this before writing, the same way the read
+// paths do. A filename with no live contact returns nil; the precondition and
+// insert paths handle that case.
+func (b *backend) ensureVisible(ctx context.Context, s store.ScopedStore, filename string) error {
+	c, err := s.LiveContactByFilename(ctx, filename)
+	if errors.Is(err, model.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	visible, err := resolve.Resolver{}.VisibleBooks(ctx, s)
+	if err != nil {
+		return err
+	}
+	books, err := s.ContactBookIDs(ctx, c.ID)
+	if err != nil {
+		return err
+	}
+	if !anyVisible(books, visible) {
+		return model.ErrNotFound
 	}
 	return nil
 }

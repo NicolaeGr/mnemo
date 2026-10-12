@@ -52,7 +52,12 @@ func (s ScopedStore) Search(ctx context.Context, p SearchParams) (ContactSearch,
 			fmt.Sprintf("c.search_meta->>'org' ILIKE '%%' || $%d || '%%'", lit),
 		}
 		if digits := phoneDigits(q); digits != "" {
-			or = append(or, fmt.Sprintf("c.search_meta->>'tel_norm' ILIKE '%%' || $%d || '%%'", arg(digits)))
+			// Match each normalized number on its own. Comparing against the
+			// serialized JSON array (search_meta->>'tel_norm') can match across
+			// two numbers, and no index serves that text form.
+			or = append(or, fmt.Sprintf(
+				"EXISTS (SELECT 1 FROM jsonb_array_elements_text(c.search_meta->'tel_norm') AS tel WHERE tel ILIKE '%%' || $%d || '%%')",
+				arg(digits)))
 		}
 		conds = append(conds, "("+strings.Join(or, " OR ")+")")
 	}

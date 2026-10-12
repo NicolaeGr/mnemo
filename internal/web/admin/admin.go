@@ -14,11 +14,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/emersion/go-vcard"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nicolaegr/mnemo/internal/auth"
 	"github.com/nicolaegr/mnemo/internal/contact"
 	"github.com/nicolaegr/mnemo/internal/model"
 	"github.com/nicolaegr/mnemo/internal/store"
@@ -138,15 +140,24 @@ func (a *Admin) loginPage(w http.ResponseWriter, r *http.Request) {
 // loginSubmit verifies credentials and issues the session cookie. The login
 // form posts via fetch and navigates on 200.
 func (a *Admin) loginSubmit(w http.ResponseWriter, r *http.Request) {
+	ip := auth.ClientIP(r)
+	now := time.Now()
+	if !auth.AllowAuthAttempt(ip, now) {
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
 	u, err := a.users.ByLogin(r.Context(), r.FormValue("username"))
 	if err != nil || !store.CheckPassword(u, r.FormValue("password")) {
+		auth.NoteAuthFailure(ip, now)
 		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
 		return
 	}
+	auth.ClearAuthFailures(ip)
 	if _, err := a.session.Issue(w, u.ID); err != nil {
 		http.Error(w, "session error", http.StatusInternalServerError)
 		return
@@ -166,11 +177,14 @@ func (a *Admin) logout(w http.ResponseWriter, r *http.Request) {
 
 func (a *Admin) overviewLeaf(r *http.Request) templ.Component {
 	var books, devices, contacts int
-	_ = a.pool.QueryRow(r.Context(), `
+	err := a.pool.QueryRow(r.Context(), `
 		SELECT (SELECT count(*) FROM books WHERE owner_user_id = $1 AND is_active),
 		       (SELECT count(*) FROM principals WHERE user_id = $1),
 		       (SELECT count(*) FROM contacts WHERE user_id = $1 AND deleted_at IS NULL)`,
 		uictx.From(r.Context()).UserID).Scan(&books, &devices, &contacts)
+	if err != nil {
+		return pages.ErrorBanner(err.Error())
+	}
 	return pages.Overview(books, devices, contacts)
 }
 
@@ -612,7 +626,10 @@ func (a *Admin) putNewContact(r *http.Request, form contact.Form) error {
 	if err != nil {
 		return err
 	}
-	filename := newFilename()
+	filename, err := newFilename()
+	if err != nil {
+		return err
+	}
 	vcardmeta.EnsureFormattedName(card)
 	uid := vcardmeta.EnsureUID(card, filename)
 	text := vcardmeta.CanonicalText(card)
@@ -916,12 +933,12 @@ func bookSet(r *http.Request) map[int64]bool {
 	return want
 }
 
-func newFilename() string {
+func newFilename() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		return ""
+		return "", err
 	}
-	return hex.EncodeToString(b) + ".vcf"
+	return hex.EncodeToString(b) + ".vcf", nil
 }
 
 func (a *Admin) actor(r *http.Request) model.Actor {

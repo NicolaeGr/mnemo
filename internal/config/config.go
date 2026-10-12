@@ -30,7 +30,7 @@ func Load() Config {
 		SessionSecret:  os.Getenv("SESSION_SECRET"),
 		CookieSecure:   getenv("COOKIE_SECURE", "false") == "true",
 		CookieSameSite: getenv("COOKIE_SAMESITE", "lax"),
-		BcryptCost:     10,
+		BcryptCost:     12,
 	}
 }
 

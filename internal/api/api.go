@@ -17,7 +17,6 @@ import (
 	"github.com/emersion/go-vcard"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/nicolaegr/mnemo/internal/auth"
 	"github.com/nicolaegr/mnemo/internal/contact"
@@ -30,6 +29,9 @@ type api struct {
 	users *store.Users
 	pool  *pgxpool.Pool
 }
+
+// signupBcryptCost is the bcrypt cost signup uses. C2.6 sets the minimum at 12.
+const signupBcryptCost = 12
 
 // New builds the /api/v1 handler.
 func New(users *store.Users, pool *pgxpool.Pool) http.Handler {
@@ -322,7 +324,11 @@ func (a *api) createContact(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	filename := uuidFilename()
+	filename, err := uuidFilename()
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	vcardmeta.EnsureFormattedName(card)
 	uid := vcardmeta.EnsureUID(card, filename)
 	text := vcardmeta.CanonicalText(card)
@@ -427,12 +433,12 @@ func parseVCard(text string) (vcard.Card, error) {
 	return vcard.NewDecoder(strings.NewReader(text)).Decode()
 }
 
-func uuidFilename() string {
+func uuidFilename() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		return ""
+		return "", err
 	}
-	return hex.EncodeToString(b) + ".vcf"
+	return hex.EncodeToString(b) + ".vcf", nil
 }
 
 // deleteContact soft-deletes one live contact by id.
@@ -777,7 +783,7 @@ func (a *api) signup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	u, _, err := a.users.Signup(r.Context(), body.Username, body.Email, body.Name, body.Password, bcrypt.DefaultCost)
+	u, _, err := a.users.Signup(r.Context(), body.Username, body.Email, body.Name, body.Password, signupBcryptCost)
 	writeJSON(w, 201, meOut{u.ID, u.Username, u.Email, u.Name}, err)
 }
 
