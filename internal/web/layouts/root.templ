@@ -1,6 +1,8 @@
 package layouts
 
 import (
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/nicolaegr/mnemo/internal/web/seg"
@@ -14,12 +16,12 @@ templ RootSegment(child templ.Component) {
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ seg.PageTitle(ctx) }</title>
 			<style>[x-cloak]{display:none !important}</style>
-			<link rel="stylesheet" href="/static/output.css"/>
-			<script src="/static/theme.js"></script>
+			<link rel="stylesheet" href={ "/static/output.css?v=" + assetVersion("output.css") }/>
+			<script src={ "/static/theme.js?v=" + assetVersion("theme.js") }></script>
 			<script defer src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
 			<!-- app.js must define its Alpine factories (shell, listView, ...) before
 			     Alpine starts, so it loads ahead of the Alpine bundle. -->
-			<script defer src="/static/app.js"></script>
+			<script defer src={ "/static/app.js?v=" + assetVersion("app.js") }></script>
 			<script defer src="https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js"></script>
 			<script type="module" src="https://unpkg.com/@oddbird/css-anchor-positioning"></script>
 		</head>
@@ -37,4 +39,15 @@ func stackAttr(ids []string) string {
 		return "root"
 	}
 	return strings.Join(ids, ",")
+}
+
+// assetVersion is a cache-busting token for a static file: its modification time,
+// so a rebuild changes the URL and the browser is forced to fetch the fresh asset.
+// The assets are served straight from ./assets (see web/routes.go).
+func assetVersion(name string) string {
+	info, err := os.Stat("assets/" + name)
+	if err != nil {
+		return "0"
+	}
+	return strconv.FormatInt(info.ModTime().UnixNano(), 10)
 }

@@ -75,29 +75,37 @@ func contactEditorData(d ContactFormData) string {
 
 // ContactsData is everything the contacts page and its rows fragment need.
 type ContactsData struct {
-	Contacts []ContactView
-	Books    []store.Book
-	Q        string
-	Sort     string
-	Dir      string
-	Page     int
-	Per      int
-	Total    int
-	BookID   string
-	BookName string
-	ErrMsg   string
+	Contacts     []ContactView
+	Books        []store.Book
+	Q            string
+	Sort         string
+	Dir          string
+	SortExplicit bool
+	Page         int
+	Per          int
+	Total        int
+	BookID       string
+	BookName     string
+	ErrMsg       string
 }
 
 func contactsViewData(d ContactsData) string {
+	// With no chosen column the server ranks by relevance, so no header should
+	// read as the active sort. An explicit sort is echoed to the controller.
+	sort := d.Sort
+	if !d.SortExplicit {
+		sort = ""
+	}
 	data, _ := json.Marshal(map[string]any{
 		"q":        d.Q,
-		"sort":     d.Sort,
+		"sort":     sort,
 		"dir":      d.Dir,
 		"page":     d.Page,
 		"per":      d.Per,
 		"total":    d.Total,
 		"book":     d.BookID,
 		"ids":      ContactIDs(d),
+		"specs":    store.ContactSearchFields(),
 		"endpoint": "/dashboard/contacts/search",
 		"target":   "#contacts-rows",
 	})
@@ -124,19 +132,59 @@ templ ContactsList(d ContactsData) {
 templ ContactTable(d ContactsData) {
 	<div x-data={ "listView(" + contactsViewData(d) + ")" } @listmeta.window="onMeta($event)" class="space-y-4">
 		<div class="flex flex-wrap items-center gap-3">
-			<div class="relative min-w-[16rem] max-w-md flex-1">
+			<div class="relative min-w-[16rem] max-w-md flex-1" @click.outside="closeCombo()">
 				<span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
 					@Icon("search")
 				</span>
 				<input
+					x-ref="search"
 					type="search"
 					x-model="q"
-					placeholder="Search name, organization, or phone"
+					@input="onSearchInput()"
+					@keydown="onSearchKeydown($event)"
+					placeholder="Search — try name:Josh, org:Acme, has:phone"
+					autocomplete="off"
+					role="combobox"
+					aria-autocomplete="list"
+					:aria-expanded="comboOpen ? 'true' : 'false'"
 					class="h-9 w-full rounded-md border border-input bg-background pl-9 pr-9 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"
 				/>
-				<span x-show="loading" x-cloak class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+				<span x-show="loading" x-cloak class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
 					@Icon("spinner")
 				</span>
+				<button
+					type="button"
+					x-show="q.length > 0 && !loading"
+					x-cloak
+					aria-label="Clear search"
+					title="Clear search"
+					@click="clearQuery()"
+					class="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+				>
+					@Icon("x")
+				</button>
+				<div
+					x-show="comboOpen"
+					x-cloak
+					role="listbox"
+					class="absolute left-0 right-0 top-full z-30 mt-1 w-full overflow-hidden rounded-md border border-border bg-background p-1 shadow-lg"
+				>
+					<template x-for="(s, i) in comboItems" :key="s.key">
+						<button
+							type="button"
+							role="option"
+							tabindex="-1"
+							:aria-selected="i === comboIndex"
+							@mousedown.prevent="pickSuggestion(s)"
+							@mouseenter="comboIndex = i"
+							:class="i === comboIndex ? 'bg-accent/15 text-accent' : ''"
+							class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors"
+						>
+							<span class="text-[10px] font-medium uppercase tracking-wide">Match</span>
+							<span class="truncate" x-text="s.label"></span>
+						</button>
+					</template>
+				</div>
 			</div>
 			if d.BookName != "" {
 				<a href="/dashboard/contacts" class="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs transition-colors hover:bg-border" title="Clear list filter">
@@ -145,6 +193,11 @@ templ ContactTable(d ContactsData) {
 				</a>
 			}
 			<span class="ml-auto text-sm text-muted-foreground"><span x-text="countLabel"></span></span>
+		</div>
+		<div class="flex flex-wrap items-center gap-2">
+			<button type="button" @click="toggleToken('has:phone')" class="inline-flex items-center rounded border px-1.5 py-0.5 text-xs transition-colors" :class="hasToken('has:phone') ? 'border-transparent bg-accent text-accent-foreground' : 'border-border text-muted-foreground hover:bg-muted'">Has phone</button>
+			<button type="button" @click="toggleToken('has:email')" class="inline-flex items-center rounded border px-1.5 py-0.5 text-xs transition-colors" :class="hasToken('has:email') ? 'border-transparent bg-accent text-accent-foreground' : 'border-border text-muted-foreground hover:bg-muted'">Has email</button>
+			<button type="button" @click="toggleToken('untagged:1')" class="inline-flex items-center rounded border px-1.5 py-0.5 text-xs transition-colors" :class="hasToken('untagged:1') ? 'border-transparent bg-accent text-accent-foreground' : 'border-border text-muted-foreground hover:bg-muted'">Untagged</button>
 		</div>
 		<div x-show="hasSelection" x-cloak class="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
 			<span><span x-text="selected.length"></span> selected</span>

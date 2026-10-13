@@ -774,11 +774,12 @@ func (a *Admin) contactFormData(r *http.Request, id int64) (pages.ContactFormDat
 
 // contactQuery is the parsed query string of the contacts list.
 type contactQuery struct {
-	q      string
-	bookID *int64
-	sort   string
-	dir    string
-	page   int
+	q            string
+	bookID       *int64
+	sort         string
+	dir          string
+	page         int
+	sortExplicit bool // the user picked a column, so relevance ranking is off
 }
 
 const contactPer = 50
@@ -787,12 +788,13 @@ func contactQueryFrom(r *http.Request) contactQuery {
 	values := r.URL.Query()
 	out := contactQuery{
 		q:    values.Get("q"),
-		sort: values.Get("sort"),
 		dir:  values.Get("dir"),
 		page: atoiDefault(values.Get("page"), 1),
 	}
-	switch out.sort {
-	case "org", "updated", "created":
+	switch sort := values.Get("sort"); sort {
+	case "name", "org", "updated", "created":
+		out.sort = sort
+		out.sortExplicit = true
 	default:
 		out.sort = "name"
 	}
@@ -819,14 +821,15 @@ func atoiDefault(s string, def int) int {
 func (a *Admin) contactsData(r *http.Request, qry contactQuery) (pages.ContactsData, error) {
 	views, books, total, err := a.contactViews(r, qry)
 	data := pages.ContactsData{
-		Contacts: views,
-		Books:    books,
-		Q:        qry.q,
-		Sort:     qry.sort,
-		Dir:      qry.dir,
-		Page:     qry.page,
-		Per:      contactPer,
-		Total:    total,
+		Contacts:     views,
+		Books:        books,
+		Q:            qry.q,
+		Sort:         qry.sort,
+		Dir:          qry.dir,
+		SortExplicit: qry.sortExplicit,
+		Page:         qry.page,
+		Per:          contactPer,
+		Total:        total,
 	}
 	if qry.bookID != nil {
 		data.BookID = strconv.FormatInt(*qry.bookID, 10)
@@ -856,6 +859,7 @@ func (a *Admin) contactViews(r *http.Request, qry contactQuery) ([]pages.Contact
 			Per:    contactPer,
 			Sort:   qry.sort,
 			Dir:    qry.dir,
+			Rank:   !qry.sortExplicit,
 		})
 		if err != nil {
 			return err

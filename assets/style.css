@@ -50,61 +50,63 @@
     color-scheme: dark;
 }
 
-* {
-    box-sizing: border-box;
-}
+@layer base {
+    * {
+        box-sizing: border-box;
+    }
 
-[x-cloak] {
-    display: none !important;
-}
+    [x-cloak] {
+        display: none !important;
+    }
 
-html,
-body {
-    margin: 0;
-    padding: 0;
-}
+    html,
+    body {
+        margin: 0;
+        padding: 0;
+    }
 
-body {
-    background: var(--color-background);
-    color: var(--color-foreground);
-    font-family:
-        ui-sans-serif,
-        system-ui,
-        -apple-system,
-        "Segoe UI",
-        Roboto,
-        "Helvetica Neue",
-        Arial,
-        sans-serif;
-    font-size: 16px;
-    line-height: 1.5;
-    -webkit-font-smoothing: antialiased;
-    transition: background-color 0.2s ease;
-}
+    body {
+        background: var(--color-background);
+        color: var(--color-foreground);
+        font-family:
+            ui-sans-serif,
+            system-ui,
+            -apple-system,
+            "Segoe UI",
+            Roboto,
+            "Helvetica Neue",
+            Arial,
+            sans-serif;
+        font-size: 16px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+        transition: background-color 0.2s ease;
+    }
 
-a {
-    color: inherit;
-    text-decoration: none;
-}
+    a {
+        color: inherit;
+        text-decoration: none;
+    }
 
-button {
-    font: inherit;
-    cursor: pointer;
-    color: inherit;
-    background: none;
-    border: none;
-}
+    button {
+        font: inherit;
+        cursor: pointer;
+        color: inherit;
+        background: none;
+        border: none;
+    }
 
-code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.9em;
-}
+    code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.9em;
+    }
 
-h1,
-h2,
-h3 {
-    margin: 0;
-    letter-spacing: -0.02em;
+    h1,
+    h2,
+    h3 {
+        margin: 0;
+        letter-spacing: -0.02em;
+    }
 }
 
 .btn {

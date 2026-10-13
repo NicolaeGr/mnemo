@@ -255,6 +255,9 @@
   .bottom-2 {
     bottom: calc(var(--spacing) * 2);
   }
+  .left-0 {
+    left: 0px;
+  }
   .left-3 {
     left: calc(var(--spacing) * 3);
   }
@@ -263,6 +266,9 @@
   }
   .z-20 {
     z-index: 20;
+  }
+  .z-30 {
+    z-index: 30;
   }
   .z-40 {
     z-index: 40;
@@ -363,6 +369,9 @@
   .h-5 {
     height: calc(var(--spacing) * 5);
   }
+  .h-6 {
+    height: calc(var(--spacing) * 6);
+  }
   .h-7 {
     height: calc(var(--spacing) * 7);
   }
@@ -398,6 +407,9 @@
   }
   .w-5 {
     width: calc(var(--spacing) * 5);
+  }
+  .w-6 {
+    width: calc(var(--spacing) * 6);
   }
   .w-7 {
     width: calc(var(--spacing) * 7);
@@ -629,6 +641,9 @@
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-red-600) 40%, transparent);
     }
+  }
+  .border-transparent {
+    border-color: transparent;
   }
   .bg-accent {
     background-color: var(--accent);
@@ -1046,43 +1061,45 @@
   --accent-foreground: oklch(0.145 0 0);
   color-scheme: dark;
 }
-* {
-  box-sizing: border-box;
-}
-[x-cloak] {
-  display: none !important;
-}
-html, body {
-  margin: 0;
-  padding: 0;
-}
-body {
-  background: var(--color-background);
-  color: var(--color-foreground);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  transition: background-color 0.2s ease;
-}
-a {
-  color: inherit;
-  text-decoration: none;
-}
-button {
-  font: inherit;
-  cursor: pointer;
-  color: inherit;
-  background: none;
-  border: none;
-}
-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.9em;
-}
-h1, h2, h3 {
-  margin: 0;
-  letter-spacing: -0.02em;
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  [x-cloak] {
+    display: none !important;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    transition: background-color 0.2s ease;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+  button {
+    font: inherit;
+    cursor: pointer;
+    color: inherit;
+    background: none;
+    border: none;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+  }
+  h1, h2, h3 {
+    margin: 0;
+    letter-spacing: -0.02em;
+  }
 }
 .btn {
   display: inline-flex;

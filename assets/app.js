@@ -77,7 +77,9 @@ window.shell = () => ({
 // listView backs the sortable, searchable tables (contacts, devices). It owns
 // the sort/dir/page state, debounces changes, and asks htmx to refetch just the
 // rows. The count and pager render from this state, refreshed by the rows
-// endpoint's HX-Trigger payload.
+// endpoint's HX-Trigger payload. On the contacts list it also drives structured
+// search: specifier completions (name:/org:/…) and filter chips, both of which
+// just compose tokens into q.
 window.listView = (init) => ({
   q: init.q || "",
   sort: init.sort || "name",
@@ -92,6 +94,11 @@ window.listView = (init) => ({
   selected: [],
   loading: false,
   timer: null,
+  // Structured search: specifiers offered as completions.
+  specs: init.specs || [],
+  comboOpen: false,
+  comboIndex: -1,
+  comboItems: [],
   init() {
     this.$watch("q", () => {
       this.page = 1;
@@ -173,6 +180,145 @@ window.listView = (init) => ({
   ariaSort(field) {
     if (this.sort !== field) return "none";
     return this.dir === "asc" ? "ascending" : "descending";
+  },
+
+  // --- structured search ---------------------------------------------------
+  // Chips toggle a fixed token (has=phone, untagged=1) in q; state is read back
+  // from q, so a typed token and a clicked chip are the same thing.
+  hasToken(t) {
+    return this.q.split(/\s+/).indexOf(t) >= 0;
+  },
+  toggleToken(t) {
+    const parts = this.q.split(/\s+/).filter((p) => p !== "");
+    const i = parts.indexOf(t);
+    if (i >= 0) parts.splice(i, 1);
+    else parts.push(t);
+    this.q = parts.join(" ");
+  },
+  clearQuery() {
+    this.q = "";
+  },
+
+  // tokenSpans splits q into whitespace-delimited tokens with their offsets.
+  tokenSpans() {
+    const value = this.q || "";
+    const spans = [];
+    let i = 0;
+    while (i < value.length) {
+      if (/\s/.test(value[i])) {
+        i++;
+        continue;
+      }
+      const start = i;
+      while (i < value.length && !/\s/.test(value[i])) i++;
+      spans.push({ start, end: i, text: value.slice(start, i) });
+    }
+    return spans;
+  },
+
+  // wrapTarget is the plain-word token nearest the caret that a specifier may be
+  // wrapped around, or null when there is nothing sensible to wrap. Specifiers
+  // (key:value / key=value) are never targets, so a fully-specified query offers
+  // nothing. At a token boundary the token on the caret's left wins (the word
+  // just typed), falling back to the right, so `text spec text` wraps only the
+  // word on the caret's side rather than both.
+  wrapTarget() {
+    const spans = this.tokenSpans();
+    if (spans.length === 0) return null;
+    const el = this.$refs.search;
+    const pos =
+      el && el.selectionStart != null
+        ? el.selectionStart
+        : (this.q || "").length;
+    const isSpec = (t) => t.indexOf(":") >= 0 || t.indexOf("=") >= 0;
+
+    for (const s of spans) {
+      if (pos > s.start && pos < s.end) {
+        return isSpec(s.text) ? null : s;
+      }
+    }
+    let left = null;
+    let right = null;
+    for (const s of spans) {
+      if (s.end <= pos) left = s;
+      if (s.start >= pos && right === null) right = s;
+    }
+    if (left && !isSpec(left.text)) return left;
+    if (right && !isSpec(right.text)) return right;
+    return null;
+  },
+
+  onSearchInput() {
+    this.refreshCombo();
+  },
+
+  // The dropdown lists the specifiers for the wrap target. Nothing is selected
+  // by default, so Enter only wraps once the user has actively chosen an option.
+  refreshCombo() {
+    const target = this.wrapTarget();
+    if (this.specs.length === 0 || !target) {
+      this.comboOpen = false;
+      this.comboIndex = -1;
+      this.comboItems = [];
+      return;
+    }
+    this.comboItems = this.specs.map((s) => ({
+      key: s.key,
+      label: s.label + ':"' + target.text + '"',
+    }));
+    this.comboIndex = -1;
+    this.comboOpen = true;
+  },
+
+  onSearchKeydown(e) {
+    if (!this.comboOpen) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      this.comboIndex =
+        this.comboIndex < 0
+          ? 0
+          : (this.comboIndex + 1) % this.comboItems.length;
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      this.comboIndex =
+        this.comboIndex < 0
+          ? this.comboItems.length - 1
+          : (this.comboIndex - 1 + this.comboItems.length) %
+            this.comboItems.length;
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      // Only wrap on an explicit selection; a bare Enter must not.
+      if (this.comboIndex >= 0 && this.comboIndex < this.comboItems.length) {
+        e.preventDefault();
+        this.pickSuggestion(this.comboItems[this.comboIndex]);
+      }
+    } else if (e.key === "Escape") {
+      this.comboOpen = false;
+    }
+  },
+
+  // Wrap the target token in the chosen specifier, leaving the caret after it so
+  // another term can follow. The input keeps focus; the options never take it.
+  pickSuggestion(item) {
+    const target = this.wrapTarget();
+    if (!target) return;
+    const el = this.$refs.search;
+    const value = this.q || "";
+    const replacement = item.key + ':"' + target.text + '" ';
+    this.q =
+      value.slice(0, target.start) + replacement + value.slice(target.end);
+    this.comboOpen = false;
+    this.comboIndex = -1;
+    if (el) {
+      const caret = target.start + replacement.length;
+      this.$nextTick(() => {
+        el.focus();
+        el.setSelectionRange(caret, caret);
+      });
+    }
+  },
+
+  closeCombo() {
+    this.comboOpen = false;
   },
 });
 
