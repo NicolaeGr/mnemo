@@ -74,6 +74,126 @@ window.shell = () => ({
   },
 });
 
+// palette backs the command palette (Ctrl/Cmd+K). Alpine owns open/close, the
+// query, and keyboard selection; htmx owns the requests that swap
+// #palette-results. Options are real elements, so Enter just clicks the active
+// one. See pages/palette.templ.
+window.palette = () => ({
+  open: false,
+  q: "",
+  activeId: "",
+  index: -1,
+  _returnFocus: null,
+  init() {
+    this._onHotkey = (e) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.altKey &&
+        (e.key === "k" || e.key === "K")
+      ) {
+        e.preventDefault();
+        this.toggle();
+      }
+    };
+    window.addEventListener("keydown", this._onHotkey);
+
+    // htmx event names are camelCase but Alpine attribute handlers are lowercased
+    // by the HTML parser, so preselect via a direct listener after every swap.
+    this._onSwap = (e) => {
+      if (e.target && e.target.id === "palette-results") this.selectFirst();
+    };
+    document.addEventListener("htmx:afterSwap", this._onSwap);
+  },
+  destroy() {
+    window.removeEventListener("keydown", this._onHotkey);
+    document.removeEventListener("htmx:afterSwap", this._onSwap);
+  },
+  // items are the rendered, visible options (a hidden palette reports none).
+  get items() {
+    return Array.from(
+      this.$refs.results.querySelectorAll('[role="option"]'),
+    ).filter((el) => el.getClientRects().length > 0);
+  },
+  toggle() {
+    if (this.open) this.close();
+    else this.show();
+  },
+  show() {
+    this._returnFocus = document.activeElement;
+    this.open = true;
+    this.$nextTick(() => {
+      this.$refs.input.focus();
+      this.$refs.input.select();
+      this.selectFirst();
+    });
+  },
+  close() {
+    this.open = false;
+    if (this._returnFocus && this._returnFocus.focus) this._returnFocus.focus();
+  },
+  onKeydown(e) {
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        this.move(1);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        this.move(-1);
+        break;
+      case "Enter":
+        e.preventDefault();
+        this.choose();
+        break;
+      case "Escape":
+        e.preventDefault();
+        this.close();
+        break;
+    }
+  },
+  selectFirst() {
+    const items = this.items;
+    this.select(items.length ? items[0] : null);
+  },
+  select(el) {
+    this.items.forEach((it) => it.classList.remove("is-active"));
+    if (!el) {
+      this.index = -1;
+      this.activeId = "";
+      return;
+    }
+    const i = this.items.indexOf(el);
+    if (i < 0) return;
+    this.index = i;
+    el.classList.add("is-active");
+    this.activeId = el.id || "";
+    el.scrollIntoView({ block: "nearest" });
+  },
+  move(delta) {
+    const items = this.items;
+    if (items.length === 0) return;
+    if (this.index < 0) {
+      this.select(items[delta > 0 ? 0 : items.length - 1]);
+      return;
+    }
+    const next = (this.index + delta + items.length) % items.length;
+    this.select(items[next]);
+  },
+  choose() {
+    const el = this.items[this.index];
+    if (el) el.click();
+  },
+});
+
+// Show the platform's command key in the palette trigger hint (⌘ on Mac).
+// The header is server-rendered once and persists across fragment navigations,
+// so a single pass at load is enough.
+document.querySelectorAll("[data-palette-mod]").forEach((el) => {
+  if (/Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent)) {
+    el.textContent = "⌘";
+  }
+});
+
 // listView backs the sortable, searchable tables (contacts, devices). It owns
 // the sort/dir/page state, debounces changes, and asks htmx to refetch just the
 // rows. The count and pager render from this state, refreshed by the rows

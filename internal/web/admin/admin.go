@@ -89,6 +89,8 @@ func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) ht
 	mux.Handle("GET /dashboard/settings/modal", a.modal(a.settingsModal))
 	mux.Handle("POST /dashboard/settings", a.mutate(http.HandlerFunc(a.saveSettings)))
 
+	mux.Handle("GET /dashboard/palette", a.requireSession(http.HandlerFunc(a.palette)))
+
 	return mux
 }
 
@@ -1293,6 +1295,125 @@ func (a *Admin) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	renderTempl(w, r, pages.SettingsBookForm(books, def, errorText(cause), target))
+}
+
+// --- palette ---
+
+// palettePer caps each palette result group, matching the 6-contact preview
+// used elsewhere.
+const palettePer = 6
+
+// palette renders the command palette's results fragment for the htmx request:
+// matching contacts, lists, and devices plus static actions, filtered by q.
+func (a *Admin) palette(w http.ResponseWriter, r *http.Request) {
+	renderTempl(w, r, pages.PaletteResults(a.paletteData(r)))
+}
+
+// paletteData assembles the fragment data. An empty query returns only the
+// static actions; otherwise every group is filtered by the query, so a query
+// matching nothing yields the empty state.
+func (a *Admin) paletteData(r *http.Request) pages.PaletteData {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	data := pages.PaletteData{Q: q, Actions: paletteActions(q)}
+	if q == "" {
+		return data
+	}
+	needle := strings.ToLower(q)
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		res, err := s.Search(r.Context(), store.SearchParams{Query: q, Page: 1, Per: palettePer, Rank: true})
+		if err != nil {
+			return err
+		}
+		for _, c := range res.Contacts {
+			data.Contacts = append(data.Contacts, paletteContact(c))
+		}
+		books, err := s.ListBooks(r.Context())
+		if err != nil {
+			return err
+		}
+		for _, b := range books {
+			if len(data.Lists) >= palettePer {
+				break
+			}
+			if strings.Contains(strings.ToLower(b.DisplayName), needle) {
+				data.Lists = append(data.Lists, pages.PaletteList{ID: b.ID, Name: b.DisplayName})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		data.ErrMsg = err.Error()
+		return data
+	}
+	views, _, err := a.deviceViews(r)
+	if err != nil {
+		data.ErrMsg = err.Error()
+		return data
+	}
+	for _, v := range views {
+		if len(data.Devices) >= palettePer {
+			break
+		}
+		if strings.Contains(strings.ToLower(v.Principal.Label), needle) {
+			data.Devices = append(data.Devices, pages.PaletteDevice{Label: v.Principal.Label})
+		}
+	}
+	return data
+}
+
+// paletteContact reads the display fields straight from search_meta; the name
+// falls back to the UID when the vCard had no FN.
+func paletteContact(c store.Contact) pages.PaletteContact {
+	out := pages.PaletteContact{ID: c.ID, Name: c.UID}
+	var meta struct {
+		FN     string   `json:"fn"`
+		Org    string   `json:"org"`
+		Emails []string `json:"emails"`
+		Tels   []struct {
+			Raw string `json:"raw"`
+		} `json:"tels"`
+	}
+	if len(c.SearchMeta) > 0 && json.Unmarshal(c.SearchMeta, &meta) == nil {
+		if meta.FN != "" {
+			out.Name = meta.FN
+		}
+		out.Org = meta.Org
+		if len(meta.Emails) > 0 {
+			out.Email = meta.Emails[0]
+		}
+		if len(meta.Tels) > 0 {
+			out.Tel = meta.Tels[0].Raw
+		}
+	}
+	return out
+}
+
+// paletteActions is the static command set, filtered by label when a query is
+// present. Modal actions open the existing add forms in #modal-root; the rest
+// fragment-navigate like NavLink; Toggle theme runs its Alpine click expression.
+func paletteActions(q string) []pages.PaletteAction {
+	all := []pages.PaletteAction{
+		{Label: "New contact", Icon: "plus", Href: "/dashboard/contacts/new", Modal: true},
+		{Label: "New list", Icon: "plus", Href: "/dashboard/books/new", Modal: true},
+		{Label: "New device", Icon: "plus", Href: "/dashboard/devices/new", Modal: true},
+		{Label: "Overview", Icon: "overview", Href: "/dashboard"},
+		{Label: "Contacts", Icon: "contacts", Href: "/dashboard/contacts"},
+		{Label: "Lists", Icon: "lists", Href: "/dashboard/books"},
+		{Label: "Devices", Icon: "devices", Href: "/dashboard/devices"},
+		{Label: "Settings", Icon: "settings", Href: "/dashboard/settings"},
+		{Label: "Toggle theme", Icon: "sun", Click: "toggleTheme()"},
+	}
+	needle := strings.ToLower(strings.TrimSpace(q))
+	if needle == "" {
+		return all
+	}
+	out := make([]pages.PaletteAction, 0, len(all))
+	for _, a := range all {
+		if strings.Contains(strings.ToLower(a.Label), needle) {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // --- helpers ---

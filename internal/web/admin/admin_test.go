@@ -413,6 +413,63 @@ func TestAdminSidebarOOB(t *testing.T) {
 	}
 }
 
+func TestAdminPalette(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	users := store.NewUsers(pool)
+	user, _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
+	if err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
+	h := admin.New(users, pool, mgr)
+	cookie, csrf := login(t, h, mgr, "admin", "secret")
+
+	// The dashboard mounts the palette and its header trigger.
+	if rec := do(h, "GET", "/dashboard", nil, cookie); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), "palette-trigger") ||
+		!strings.Contains(rec.Body.String(), `id="palette-results"`) {
+		t.Fatalf("dashboard missing palette mount/trigger: %d", rec.Code)
+	}
+
+	// An empty query returns the static action list and nothing else.
+	rec := do(h, "GET", "/dashboard/palette", nil, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Actions") ||
+		!strings.Contains(rec.Body.String(), "Toggle theme") {
+		t.Fatalf("empty palette = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Seed one contact, list, and device, then find each by its label.
+	card := "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:urn:uuid:zoe\r\nFN:Zoe Quokka\r\nEND:VCARD\r\n"
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO contacts (user_id, filename, uid, vcard_text, search_meta, etag)
+		VALUES ($1, 'zoe.vcf', 'urn:uuid:zoe', $2, '{"fn":"Zoe Quokka"}', 'e')`,
+		user.ID, card); err != nil {
+		t.Fatalf("insert contact: %v", err)
+	}
+	do(h, "POST", "/dashboard/books",
+		url.Values{"csrf": {csrf}, "slug": {"wombats"}, "display_name": {"Wombat Watch"}, "tiers": {"primary", "secondary"}}, cookie)
+	do(h, "POST", "/dashboard/devices",
+		url.Values{"csrf": {csrf}, "label": {"quokka-phone"}, "tier": {"primary"}}, cookie)
+
+	for _, tc := range []struct{ q, want string }{
+		{"Zoe", "Zoe Quokka"},
+		{"Wombat", "Wombat Watch"},
+		{"quokka-phone", "quokka-phone"},
+	} {
+		rec := do(h, "GET", "/dashboard/palette?q="+url.QueryEscape(tc.q), nil, cookie)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Fatalf("palette q=%q = %d, missing %q: %s", tc.q, rec.Code, tc.want, rec.Body.String())
+		}
+	}
+
+	// A query that matches nothing shows the empty state.
+	rec = do(h, "GET", "/dashboard/palette?q=zzzznope", nil, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "No matches") {
+		t.Fatalf("no-match palette = %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func login(t *testing.T, h http.Handler, mgr *websession.Manager, user, pass string) (*http.Cookie, string) {
 	t.Helper()
 	rec := do(h, "POST", "/login", url.Values{"username": {user}, "password": {pass}}, nil)

@@ -1,0 +1,312 @@
+package pages
+
+import (
+	"strconv"
+	"strings"
+)
+
+// PaletteContact is one contact result in the command palette. Name/Org/Email/
+// Tel come from the contact's search_meta, so no vCard is decoded.
+type PaletteContact struct {
+	ID    int64
+	Name  string
+	Org   string
+	Email string
+	Tel   string
+}
+
+// PaletteList is one list result.
+type PaletteList struct {
+	ID   int64
+	Name string
+}
+
+// PaletteDevice is one device result.
+type PaletteDevice struct {
+	Label string
+}
+
+// PaletteAction is a static command. Href is the target path; Modal opens it in
+// #modal-root instead of navigating; Click is an extra Alpine expression run on
+// click before the palette closes (the theme toggle).
+type PaletteAction struct {
+	Label string
+	Icon  string
+	Href  string
+	Modal bool
+	Click string
+}
+
+// PaletteData is the results fragment: the four result groups for a query. The
+// groups render in this order (Contacts, Lists, Devices, Actions).
+type PaletteData struct {
+	Q        string
+	Contacts []PaletteContact
+	Lists    []PaletteList
+	Devices  []PaletteDevice
+	Actions  []PaletteAction
+	ErrMsg   string
+}
+
+// HasResults reports whether any group produced a result.
+func (d PaletteData) HasResults() bool {
+	return len(d.Contacts)+len(d.Lists)+len(d.Devices)+len(d.Actions) > 0
+}
+
+// Palette is the Ctrl/Cmd+K command palette. It sits once inside the dashboard
+// segment (so it persists across fragment navigations); Alpine owns open/close
+// and keyboard selection, while htmx swaps #palette-results. See window.palette
+// in app.js.
+templ Palette() {
+	<div
+		x-data="palette()"
+		x-show="open"
+		x-cloak
+		@keydown.escape="close()"
+		@palette-open.window="show()"
+		role="dialog"
+		aria-modal="true"
+		aria-label="Command palette"
+		class="palette-overlay"
+	>
+		<div class="palette-backdrop" @click="close()" aria-hidden="true"></div>
+		<div class="palette-panel" role="document">
+			<div class="palette-search">
+				<span class="palette-search-icon">
+					@Icon("search")
+				</span>
+				<input
+					x-ref="input"
+					type="search"
+					name="q"
+					x-model="q"
+					@keydown="onKeydown($event)"
+					placeholder="Search contacts, lists, devices, actions…"
+					autocomplete="off"
+					role="combobox"
+					aria-autocomplete="list"
+					aria-controls="palette-results"
+					:aria-expanded="open ? 'true' : 'false'"
+					:aria-activedescendant="activeId"
+					hx-get="/dashboard/palette"
+					hx-trigger="input changed delay:200ms, search"
+					hx-target="#palette-results"
+					hx-swap="innerHTML"
+					hx-indicator="#palette-spinner"
+					class="palette-input"
+				/>
+				<span id="palette-spinner" class="palette-spinner" aria-hidden="true">
+					@Icon("spinner")
+				</span>
+			</div>
+			<div
+				x-ref="results"
+				id="palette-results"
+				role="listbox"
+				aria-label="Results"
+				hx-get="/dashboard/palette"
+				hx-trigger="load"
+				hx-swap="innerHTML"
+				hx-indicator="#palette-spinner"
+				class="palette-results"
+			></div>
+			<div class="palette-hint">
+				<span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+				<span><kbd>↵</kbd> select</span>
+				<span><kbd>esc</kbd> close</span>
+			</div>
+		</div>
+	</div>
+}
+
+// PaletteResults is the fragment swapped into #palette-results: grouped, real
+// <a>/<button> options carrying normal hx-* attributes.
+templ PaletteResults(d PaletteData) {
+	if d.ErrMsg != "" {
+		<div class="palette-empty">{ d.ErrMsg }</div>
+	} else if !d.HasResults() {
+		<div class="palette-empty">
+			<p class="palette-empty-title">No matches</p>
+			<p class="palette-empty-body">Nothing matched “{ d.Q }”.</p>
+		</div>
+	} else {
+		if len(d.Contacts) > 0 {
+			<div role="group" aria-label="Contacts">
+				<p class="palette-group-title" aria-hidden="true">Contacts</p>
+				for i, c := range d.Contacts {
+					@paletteContactOption(i, c)
+				}
+			</div>
+		}
+		if len(d.Lists) > 0 {
+			<div role="group" aria-label="Lists">
+				<p class="palette-group-title" aria-hidden="true">Lists</p>
+				for i, l := range d.Lists {
+					@paletteListOption(i, l)
+				}
+			</div>
+		}
+		if len(d.Devices) > 0 {
+			<div role="group" aria-label="Devices">
+				<p class="palette-group-title" aria-hidden="true">Devices</p>
+				for i, dv := range d.Devices {
+					@paletteDeviceOption(i, dv)
+				}
+			</div>
+		}
+		if len(d.Actions) > 0 {
+			<div role="group" aria-label="Actions">
+				<p class="palette-group-title" aria-hidden="true">Actions</p>
+				for i, a := range d.Actions {
+					@paletteActionOption(i, a)
+				}
+			</div>
+		}
+	}
+}
+
+// paletteContactOption opens a contact's read-only view in the modal.
+templ paletteContactOption(i int, c PaletteContact) {
+	<a
+		id={ "palette-opt-contact-" + strconv.Itoa(i) }
+		href={ "/dashboard/contacts/" + strconv.FormatInt(c.ID, 10) + "/view" }
+		hx-get={ "/dashboard/contacts/" + strconv.FormatInt(c.ID, 10) + "/view" }
+		hx-target="#modal-root"
+		hx-swap="innerHTML"
+		role="option"
+		tabindex="-1"
+		@mousedown.prevent
+		@mouseenter="select($el)"
+		@click="close()"
+		class="palette-item"
+	>
+		<span class="palette-item-icon">
+			@Icon("contacts")
+		</span>
+		<span class="palette-item-body">
+			<span class="palette-item-title">{ c.Name }</span>
+			if sub := paletteContactSub(c); sub != "" {
+				<span class="palette-item-sub">{ sub }</span>
+			}
+		</span>
+		<span class="palette-item-kind">Contact</span>
+	</a>
+}
+
+// paletteListOption navigates to the lists page (there is no per-list page).
+templ paletteListOption(i int, l PaletteList) {
+	<a
+		id={ "palette-opt-list-" + strconv.Itoa(i) }
+		href="/dashboard/books"
+		hx-get="/dashboard/books"
+		hx-push-url="true"
+		role="option"
+		tabindex="-1"
+		@mousedown.prevent
+		@mouseenter="select($el)"
+		@click="close()"
+		class="palette-item"
+	>
+		<span class="palette-item-icon">
+			@Icon("lists")
+		</span>
+		<span class="palette-item-body">
+			<span class="palette-item-title">{ l.Name }</span>
+		</span>
+		<span class="palette-item-kind">List</span>
+	</a>
+}
+
+// paletteDeviceOption navigates to the devices page.
+templ paletteDeviceOption(i int, dv PaletteDevice) {
+	<a
+		id={ "palette-opt-device-" + strconv.Itoa(i) }
+		href="/dashboard/devices"
+		hx-get="/dashboard/devices"
+		hx-push-url="true"
+		role="option"
+		tabindex="-1"
+		@mousedown.prevent
+		@mouseenter="select($el)"
+		@click="close()"
+		class="palette-item"
+	>
+		<span class="palette-item-icon">
+			@Icon("devices")
+		</span>
+		<span class="palette-item-body">
+			<span class="palette-item-title">{ dv.Label }</span>
+		</span>
+		<span class="palette-item-kind">Device</span>
+	</a>
+}
+
+// paletteActionOption renders one static command: a raw onclick, a modal opener,
+// or a fragment navigation, matching how the rest of the UI wires these.
+templ paletteActionOption(i int, a PaletteAction) {
+	if a.Click != "" {
+		<button
+			type="button"
+			id={ "palette-opt-action-" + strconv.Itoa(i) }
+			@click={ a.Click + "; close()" }
+			role="option"
+			tabindex="-1"
+			@mousedown.prevent
+			@mouseenter="select($el)"
+			class="palette-item"
+		>
+			<span class="palette-item-icon">
+				@Icon(a.Icon)
+			</span>
+			<span class="palette-item-body"><span class="palette-item-title">{ a.Label }</span></span>
+		</button>
+	} else if a.Modal {
+		<button
+			type="button"
+			id={ "palette-opt-action-" + strconv.Itoa(i) }
+			hx-get={ a.Href }
+			hx-target="#modal-root"
+			hx-swap="innerHTML"
+			role="option"
+			tabindex="-1"
+			@mousedown.prevent
+			@mouseenter="select($el)"
+			@click="close()"
+			class="palette-item"
+		>
+			<span class="palette-item-icon">
+				@Icon(a.Icon)
+			</span>
+			<span class="palette-item-body"><span class="palette-item-title">{ a.Label }</span></span>
+		</button>
+	} else {
+		<a
+			id={ "palette-opt-action-" + strconv.Itoa(i) }
+			href={ a.Href }
+			hx-get={ a.Href }
+			hx-push-url="true"
+			role="option"
+			tabindex="-1"
+			@mousedown.prevent
+			@mouseenter="select($el)"
+			@click="close()"
+			class="palette-item"
+		>
+			<span class="palette-item-icon">
+				@Icon(a.Icon)
+			</span>
+			<span class="palette-item-body"><span class="palette-item-title">{ a.Label }</span></span>
+		</a>
+	}
+}
+
+// paletteContactSub joins the non-empty secondary fields for a contact row.
+func paletteContactSub(c PaletteContact) string {
+	parts := make([]string, 0, 3)
+	for _, s := range []string{c.Org, c.Email, c.Tel} {
+		if s != "" {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, " · ")
+}

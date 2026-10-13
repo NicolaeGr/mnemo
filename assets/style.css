@@ -326,3 +326,226 @@ body[data-stack~="auth"] {
     position-anchor: --user-menu-trigger;
     position-area: top span-left;
 }
+
+/* Command palette (Ctrl/Cmd+K). The overlay is fixed above the shell and the
+   modal; the panel scrolls its own results list. */
+.palette-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 4rem 1rem 1rem;
+}
+
+.palette-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgb(0 0 0 / 0.4);
+    backdrop-filter: blur(2px);
+}
+
+.palette-panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 40rem;
+    max-height: min(70vh, 34rem);
+    overflow: hidden;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    border: 1px solid var(--color-border);
+    border-radius: calc(var(--radius) + 4px);
+    box-shadow: 0 24px 64px rgb(0 0 0 / 0.28);
+}
+
+.palette-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.palette-search-icon {
+    position: absolute;
+    left: 0.75rem;
+    display: inline-flex;
+    color: var(--color-muted-foreground);
+    pointer-events: none;
+}
+
+.palette-input {
+    width: 100%;
+    height: 3rem;
+    padding: 0 2.5rem;
+    background: transparent;
+    color: inherit;
+    border: 0;
+    outline: none;
+    font: inherit;
+}
+
+.palette-spinner {
+    position: absolute;
+    right: 0.75rem;
+    display: inline-flex;
+    color: var(--color-muted-foreground);
+    opacity: 0;
+    transition: opacity 120ms ease;
+}
+.palette-spinner.htmx-request {
+    opacity: 1;
+}
+
+.palette-results {
+    overflow-y: auto;
+    padding: 0.375rem;
+}
+
+.palette-group + .palette-group {
+    margin-top: 0.375rem;
+}
+
+.palette-group-title {
+    margin: 0;
+    padding: 0.375rem 0.625rem 0.25rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-muted-foreground);
+}
+
+.palette-item {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    width: 100%;
+    padding: 0.5rem 0.625rem;
+    text-align: left;
+    color: var(--color-foreground);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background-color 120ms ease;
+}
+
+.palette-item:hover,
+.palette-item.is-active {
+    background: var(--color-muted);
+    outline: none;
+}
+
+.palette-item-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    color: var(--color-muted-foreground);
+}
+
+.palette-item-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.palette-item-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.palette-item-sub {
+    overflow: hidden;
+    font-size: 0.8125rem;
+    color: var(--color-muted-foreground);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.palette-item-kind {
+    flex-shrink: 0;
+    font-size: 0.6875rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-muted-foreground);
+}
+
+.palette-empty {
+    padding: 1.5rem 1rem;
+    text-align: center;
+    color: var(--color-muted-foreground);
+}
+
+.palette-empty-title {
+    margin: 0;
+    font-weight: 500;
+    color: var(--color-foreground);
+}
+
+.palette-empty-body {
+    margin: 0.25rem 0 0;
+    font-size: 0.875rem;
+}
+
+.palette-hint {
+    display: flex;
+    gap: 1rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+    color: var(--color-muted-foreground);
+    border-top: 1px solid var(--color-border);
+}
+
+.palette-hint kbd {
+    padding: 0.05rem 0.3rem;
+    font-family: inherit;
+    font-size: 0.6875rem;
+    background: var(--color-muted);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+}
+
+/* The header trigger that opens the palette, with its keybind hint. The hint is
+   hidden on narrow screens where the header has no room for it. */
+.palette-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    height: 2rem;
+    padding: 0 0.5rem;
+    color: var(--color-muted-foreground);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    transition:
+        background-color 120ms ease,
+        color 120ms ease;
+}
+
+.palette-trigger:hover {
+    background: var(--color-muted);
+    color: var(--color-foreground);
+}
+
+.palette-trigger-hint {
+    display: none;
+    align-items: center;
+    gap: 0.125rem;
+}
+
+@media (min-width: 768px) {
+    .palette-trigger-hint {
+        display: inline-flex;
+    }
+}
+
+.palette-trigger-hint kbd {
+    padding: 0.05rem 0.3rem;
+    font-family: inherit;
+    font-size: 0.6875rem;
+    color: var(--color-muted-foreground);
+    background: var(--color-muted);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+}

@@ -105,14 +105,27 @@ templ DashboardSegment(child templ.Component) {
 				</button>
 				@HeaderTitle(seg.PageTitle(ctx))
 				<div class="ml-auto flex items-center gap-2">
+					<button
+						type="button"
+						@click="$dispatch('palette-open')"
+						class="palette-trigger"
+						title="Search (Ctrl/Cmd+K)"
+						aria-label="Open command palette"
+					>
+						@pages.Icon("search")
+						<span class="palette-trigger-hint" aria-hidden="true">
+							<kbd data-palette-mod>Ctrl</kbd><kbd>K</kbd>
+						</span>
+					</button>
 					<div class="relative" x-data="{ open: false }" @click.outside="open = false">
 						<button
 							type="button"
 							@click="open = !open"
 							class="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted"
 							title="Notifications"
-						>@pages.Icon("bell")
-</button>
+						>
+							@pages.Icon("bell")
+						</button>
 						<div
 							x-show="open"
 							x-cloak
@@ -136,6 +149,7 @@ templ DashboardSegment(child templ.Component) {
 				@child
 			</main>
 		</div>
+		@pages.Palette()
 	</div>
 }
 
