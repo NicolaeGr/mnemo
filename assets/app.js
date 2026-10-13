@@ -88,6 +88,8 @@ window.listView = (init) => ({
   book: init.book || "",
   endpoint: init.endpoint,
   target: init.target,
+  ids: init.ids || [],
+  selected: [],
   loading: false,
   timer: null,
   init() {
@@ -104,6 +106,23 @@ window.listView = (init) => ({
   },
   get hasNext() {
     return this.page < this.pages;
+  },
+  get allSelected() {
+    return this.ids.length > 0 && this.selected.length === this.ids.length;
+  },
+  get hasSelection() {
+    return this.selected.length > 0;
+  },
+  toggle(id) {
+    const i = this.selected.indexOf(id);
+    if (i >= 0) this.selected.splice(i, 1);
+    else this.selected.push(id);
+  },
+  toggleAll() {
+    this.selected = this.allSelected ? [] : this.ids.slice();
+  },
+  clearSelection() {
+    this.selected = [];
   },
   get countLabel() {
     return this.total === 1 ? "1 result" : this.total + " results";
@@ -136,6 +155,7 @@ window.listView = (init) => ({
       page: String(this.page),
     });
     if (this.book) params.set("book", String(this.book));
+    this.selected = [];
     this.loading = true;
     htmx.ajax("GET", this.endpoint + "?" + params.toString(), {
       target: this.target,
@@ -146,11 +166,37 @@ window.listView = (init) => ({
     const d = (e && e.detail) || {};
     if (typeof d.total === "number") this.total = d.total;
     if (typeof d.page === "number") this.page = d.page;
+    if (Array.isArray(d.ids)) this.ids = d.ids;
+    this.selected = [];
     this.loading = false;
   },
   ariaSort(field) {
     if (this.sort !== field) return "none";
     return this.dir === "asc" ? "ascending" : "descending";
+  },
+});
+
+// rowMenu positions a per-row actions dropdown with fixed coordinates, so the
+// table's overflow-hidden wrapper cannot clip it.
+window.rowMenu = () => ({
+  open: false,
+  top: 0,
+  left: 0,
+  toggle(e) {
+    if (this.open) {
+      this.open = false;
+      return;
+    }
+    const r = e.currentTarget.getBoundingClientRect();
+    this.top = r.bottom + 4;
+    this.left = Math.max(8, Math.min(r.right - 176, window.innerWidth - 184));
+    this.open = true;
+  },
+  get panelStyle() {
+    return "top:" + this.top + "px;left:" + this.left + "px;";
+  },
+  close() {
+    this.open = false;
   },
 });
 

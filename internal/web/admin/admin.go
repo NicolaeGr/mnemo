@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -76,8 +77,11 @@ func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) ht
 	mux.Handle("GET /dashboard/contacts", a.dashPage("Contacts", a.contactsLeaf))
 	mux.Handle("GET /dashboard/contacts/search", a.requireSession(http.HandlerFunc(a.searchContacts)))
 	mux.Handle("GET /dashboard/contacts/new", a.modal(a.contactAddModal))
+	mux.Handle("GET /dashboard/contacts/bulk-modal", a.modal(a.bulkListsModal))
+	mux.Handle("GET /dashboard/contacts/{id}/view", a.modal(a.contactViewModal))
 	mux.Handle("GET /dashboard/contacts/{id}/edit", a.modal(a.contactEditModal))
 	mux.Handle("POST /dashboard/contacts", a.mutate(http.HandlerFunc(a.createContact)))
+	mux.Handle("POST /dashboard/contacts/bulk", a.mutate(http.HandlerFunc(a.bulkContacts)))
 	mux.Handle("POST /dashboard/contacts/{id}/edit", a.mutate(http.HandlerFunc(a.editContact)))
 	mux.Handle("POST /dashboard/contacts/{id}/delete", a.mutate(http.HandlerFunc(a.deleteContact)))
 
@@ -678,7 +682,17 @@ func (a *Admin) contactsLeaf(r *http.Request) templ.Component {
 func (a *Admin) searchContacts(w http.ResponseWriter, r *http.Request) {
 	data, err := a.contactsData(r, contactQueryFrom(r))
 	data.ErrMsg = errorText(err)
-	w.Header().Set("HX-Trigger", fmt.Sprintf(`{"listmeta":{"total":%d,"page":%d}}`, data.Total, data.Page))
+	payload, jerr := json.Marshal(map[string]any{
+		"listmeta": map[string]any{
+			"total": data.Total,
+			"page":  data.Page,
+			"ids":   pages.ContactIDs(data),
+		},
+	})
+	if jerr != nil {
+		payload = []byte(`{"listmeta":{}}`)
+	}
+	w.Header().Set("HX-Trigger", string(payload))
 	renderTempl(w, r, pages.ContactRows(data))
 }
 
@@ -967,6 +981,192 @@ func (a *Admin) deleteContact(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	a.renderContactList(w, r, err)
+}
+
+func (a *Admin) contactViewModal(r *http.Request) (string, templ.Component) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		return "Contact", pages.ErrorBanner(model.ErrNotFound.Error())
+	}
+	d, err := a.contactDetailData(r, id)
+	if err != nil {
+		return "Contact", pages.ErrorBanner(err.Error())
+	}
+	title := "Contact"
+	if d.Name != "" {
+		title = d.Name
+	}
+	return title, pages.ContactDetailPanel(d)
+}
+
+// bulkListsModal is the list picker the two bulk list actions open; the selected
+// contact ids arrive on the query string and are carried into hidden inputs.
+func (a *Admin) bulkListsModal(r *http.Request) (string, templ.Component) {
+	mode := r.URL.Query().Get("mode")
+	if mode != "set" {
+		mode = "add"
+	}
+	ids := formIDs(r.URL.Query()["id"])
+	if len(ids) == 0 {
+		return "Lists", pages.ErrorBanner("No contacts selected.")
+	}
+	var books []store.Book
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		all, err := s.ListBooks(r.Context())
+		if err != nil {
+			return err
+		}
+		books = activeBooks(all)
+		return nil
+	})
+	if err != nil {
+		return "Lists", pages.ErrorBanner(err.Error())
+	}
+	title := "Add to lists"
+	if mode == "set" {
+		title = "Set lists"
+	}
+	return title, pages.BulkListsModal(mode, ids, books)
+}
+
+// bulkContacts applies delete or list tagging to a set of contacts in one tx.
+func (a *Admin) bulkContacts(w http.ResponseWriter, r *http.Request) {
+	action := r.FormValue("action")
+	ids := formIDs(r.Form["id"])
+	listIDs := formIDs(r.Form["list"])
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
+			return err
+		}
+		switch action {
+		case "delete":
+			for _, id := range ids {
+				c, err := s.LiveContactByID(r.Context(), id)
+				if errors.Is(err, model.ErrNotFound) {
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				if _, err := s.DeleteContact(r.Context(), c.Filename); err != nil {
+					return err
+				}
+			}
+		case "add":
+			for _, id := range ids {
+				if err := s.Retag(r.Context(), id, listIDs, nil); err != nil {
+					return err
+				}
+			}
+		case "set":
+			for _, id := range ids {
+				if err := s.SetContactBooks(r.Context(), id, listIDs); err != nil {
+					return err
+				}
+			}
+		default:
+			return model.ErrPrecondition
+		}
+		return nil
+	})
+	a.renderContactList(w, r, err)
+}
+
+// formIDs parses the repeated form/query values that carry contact or list ids.
+func formIDs(vals []string) []int64 {
+	out := make([]int64, 0, len(vals))
+	for _, v := range vals {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// contactDetailData gathers the read-only view: grouped fields, addresses, list
+// membership, and timestamps.
+func (a *Admin) contactDetailData(r *http.Request, id int64) (pages.ContactDetail, error) {
+	var d pages.ContactDetail
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		c, err := s.LiveContactByID(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		card, err := vcard.NewDecoder(strings.NewReader(c.VCardText)).Decode()
+		if err != nil {
+			return err
+		}
+		form := contact.Parse(card)
+		d.ID = c.ID
+		d.UID = c.UID
+		d.Filename = c.Filename
+		d.CreatedAt = c.CreatedAt
+		d.UpdatedAt = c.UpdatedAt
+		d.Name = card.Value(vcard.FieldFormattedName)
+		if d.Name == "" {
+			d.Name = c.UID
+		}
+		d.Groups = detailGroups(form.Fields)
+		d.Addresses = form.Addresses
+		ids, err := s.ContactBookIDs(r.Context(), c.ID)
+		if err != nil {
+			return err
+		}
+		books, err := s.ListBooks(r.Context())
+		if err != nil {
+			return err
+		}
+		names := make(map[int64]string, len(books))
+		for _, b := range books {
+			names[b.ID] = b.DisplayName
+		}
+		for _, bid := range ids {
+			if n, ok := names[bid]; ok {
+				d.Lists = append(d.Lists, n)
+			}
+		}
+		sort.Strings(d.Lists)
+		return nil
+	})
+	return d, err
+}
+
+// detailGroups folds a contact's property rows into labelled blocks, preserving
+// the order the kinds first appear.
+func detailGroups(fields []contact.Field) []pages.DetailGroup {
+	labels := make(map[string]string)
+	for _, k := range contact.Kinds() {
+		labels[k.ID] = k.Label
+	}
+	byKind := make(map[string]*pages.DetailGroup)
+	var order []string
+	for _, f := range fields {
+		g, ok := byKind[f.Kind]
+		if !ok {
+			label, known := labels[f.Kind]
+			if !known {
+				label = f.Kind
+				if f.Key != "" {
+					label = f.Key
+				}
+			}
+			g = &pages.DetailGroup{Label: label}
+			byKind[f.Kind] = g
+			order = append(order, f.Kind)
+		}
+		value := f.Value
+		if f.Type != "" {
+			value = f.Type + ": " + value
+		}
+		if value != "" {
+			g.Values = append(g.Values, value)
+		}
+	}
+	out := make([]pages.DetailGroup, 0, len(order))
+	for _, k := range order {
+		out = append(out, *byKind[k])
+	}
+	return out
 }
 
 func (a *Admin) renderContactList(w http.ResponseWriter, r *http.Request, cause error) {

@@ -481,3 +481,98 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 	return pool
 }
+
+func TestAdminBulkContacts(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	users := store.NewUsers(pool)
+	user, system, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
+	if err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
+	h := admin.New(users, pool, mgr)
+	cookie, csrf := login(t, h, mgr, "admin", "secret")
+
+	do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}, "tiers": {"primary", "secondary"}}, cookie)
+	do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"personal"}, "display_name": {"Personal"}, "tiers": {"primary", "secondary"}}, cookie)
+	var workID, personalID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM books WHERE slug = 'work'`).Scan(&workID); err != nil {
+		t.Fatalf("read work: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT id FROM books WHERE slug = 'personal'`).Scan(&personalID); err != nil {
+		t.Fatalf("read personal: %v", err)
+	}
+
+	mkContact := func(fn, filename, uid string) int64 {
+		var id int64
+		card := "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:" + fn + "\r\nEND:VCARD\r\n"
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO contacts (user_id, filename, uid, vcard_text, search_meta, etag)
+			VALUES ($1, $2, $3, $4, '{}', 'e') RETURNING id`,
+			user.ID, filename, uid, card).Scan(&id); err != nil {
+			t.Fatalf("insert contact: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)`, id, system.ID); err != nil {
+			t.Fatalf("tag system: %v", err)
+		}
+		return id
+	}
+	a := mkContact("Alice", "a.vcf", "urn:uuid:a")
+	b := mkContact("Bob", "b.vcf", "urn:uuid:b")
+
+	// Bulk add: both contacts gain the work tag.
+	rec := do(h, "POST", "/dashboard/contacts/bulk", url.Values{
+		"csrf": {csrf}, "action": {"add"},
+		"id":   {strconv.FormatInt(a, 10), strconv.FormatInt(b, 10)},
+		"list": {strconv.FormatInt(workID, 10)},
+	}, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bulk add = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	for _, id := range []int64{a, b} {
+		var tagged bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $2)`, id, workID).Scan(&tagged); err != nil || !tagged {
+			t.Fatalf("contact %d not tagged work (tagged=%v err=%v)", id, tagged, err)
+		}
+	}
+
+	// Bulk set: Alice's lists become exactly personal (the default is dropped).
+	rec = do(h, "POST", "/dashboard/contacts/bulk", url.Values{
+		"csrf": {csrf}, "action": {"set"},
+		"id":   {strconv.FormatInt(a, 10)},
+		"list": {strconv.FormatInt(personalID, 10)},
+	}, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bulk set = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var inPersonal, inWork, inSystem bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $2),
+		       EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $3),
+		       EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $4)`,
+		a, personalID, workID, system.ID).Scan(&inPersonal, &inWork, &inSystem); err != nil {
+		t.Fatalf("read tags: %v", err)
+	}
+	if !inPersonal || inWork || inSystem {
+		t.Fatalf("set lists: personal=%v work=%v system=%v, want personal only", inPersonal, inWork, inSystem)
+	}
+
+	// Bulk delete: Bob is soft-deleted.
+	rec = do(h, "POST", "/dashboard/contacts/bulk", url.Values{
+		"csrf": {csrf}, "action": {"delete"},
+		"id": {strconv.FormatInt(b, 10)},
+	}, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bulk delete = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var deleted bool
+	if err := pool.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM contacts WHERE id = $1`, b).Scan(&deleted); err != nil || !deleted {
+		t.Fatalf("contact b not deleted (deleted=%v err=%v)", deleted, err)
+	}
+
+	// A bulk mutation without the CSRF token is refused.
+	if rec := do(h, "POST", "/dashboard/contacts/bulk", url.Values{"action": {"delete"}, "id": {strconv.FormatInt(a, 10)}}, cookie); rec.Code != http.StatusForbidden {
+		t.Fatalf("bulk without csrf = %d, want 403", rec.Code)
+	}
+}

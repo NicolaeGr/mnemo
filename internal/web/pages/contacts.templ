@@ -3,6 +3,8 @@ package pages
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/nicolaegr/mnemo/internal/contact"
 	"github.com/nicolaegr/mnemo/internal/store"
@@ -95,6 +97,7 @@ func contactsViewData(d ContactsData) string {
 		"per":      d.Per,
 		"total":    d.Total,
 		"book":     d.BookID,
+		"ids":      ContactIDs(d),
 		"endpoint": "/dashboard/contacts/search",
 		"target":   "#contacts-rows",
 	})
@@ -143,10 +146,52 @@ templ ContactTable(d ContactsData) {
 			}
 			<span class="ml-auto text-sm text-muted-foreground"><span x-text="countLabel"></span></span>
 		</div>
+		<div x-show="hasSelection" x-cloak class="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
+			<span><span x-text="selected.length"></span> selected</span>
+			<button
+				type="button"
+				class="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-600/40 px-3 text-xs text-red-600 transition-colors hover:bg-red-600/10"
+				hx-post="/dashboard/contacts/bulk"
+				hx-vals={ bulkVals("delete", uictx.From(ctx).CSRF) }
+				hx-include=".contact-row-check"
+				hx-target="#contacts-list"
+				hx-swap="outerHTML"
+				hx-confirm="Delete the selected contacts? They are soft-deleted and purged after two days."
+			>
+				@Icon("trash")
+				<span>Delete</span>
+			</button>
+			<button
+				type="button"
+				class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted"
+				hx-get="/dashboard/contacts/bulk-modal?mode=add"
+				hx-include=".contact-row-check"
+				hx-target="#modal-root"
+				hx-swap="innerHTML"
+			>
+				@Icon("plus")
+				<span>Add to lists</span>
+			</button>
+			<button
+				type="button"
+				class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted"
+				hx-get="/dashboard/contacts/bulk-modal?mode=set"
+				hx-include=".contact-row-check"
+				hx-target="#modal-root"
+				hx-swap="innerHTML"
+			>
+				@Icon("lists")
+				<span>Set lists</span>
+			</button>
+			<button type="button" @click="clearSelection()" class="ml-auto text-xs text-muted-foreground transition-colors hover:text-foreground">Clear</button>
+		</div>
 		<div class="overflow-hidden rounded-lg border border-border">
 			<table class="w-full text-sm">
 				<thead class="border-b border-border bg-muted/40">
 					<tr>
+						<th scope="col" class="w-px px-3 py-2">
+							<input type="checkbox" aria-label="Select all contacts" class="h-4 w-4" style="accent-color: var(--accent)" :checked="allSelected" @change="toggleAll()"/>
+						</th>
 						<th scope="col" class="w-px px-3 py-2"><span class="sr-only">Actions</span></th>
 						@SortableTh("name", "Name", "")
 						<th scope="col" class="hidden px-3 py-2 text-left text-xs font-medium text-muted-foreground sm:table-cell">Phone</th>
@@ -176,13 +221,13 @@ templ ContactTable(d ContactsData) {
 templ ContactRows(d ContactsData) {
 	if d.ErrMsg != "" {
 		<tr>
-			<td colspan="7" class="px-3 py-4">
+			<td colspan="8" class="px-3 py-4">
 				@ErrorBanner(d.ErrMsg)
 			</td>
 		</tr>
 	} else if len(d.Contacts) == 0 {
 		<tr>
-			<td colspan="7">
+			<td colspan="8">
 				@contactsEmpty(d)
 			</td>
 		</tr>
@@ -196,18 +241,63 @@ templ ContactRows(d ContactsData) {
 templ ContactRow(c ContactView, books []store.Book) {
 	<tr class="hover:bg-muted/40">
 		<td class="w-px px-3 py-2">
+			<input
+				type="checkbox"
+				name="id"
+				value={ strconv.FormatInt(c.Contact.ID, 10) }
+				class="contact-row-check h-4 w-4"
+				style="accent-color: var(--accent)"
+				aria-label="Select contact"
+				:checked={ "selected.includes(" + strconv.FormatInt(c.Contact.ID, 10) + ")" }
+				@change={ "toggle(" + strconv.FormatInt(c.Contact.ID, 10) + ")" }
+			/>
+		</td>
+		<td class="w-px px-3 py-2">
+			<div class="relative" x-data="rowMenu()" @click.outside="close()">
+				<button
+					type="button"
+					class="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+					title="Actions"
+					@click="toggle($event)"
+				>
+					@Icon("more")
+				</button>
+				<div
+					x-show="open"
+					x-cloak
+					:style="panelStyle"
+					class="fixed z-50 w-44 overflow-hidden rounded-lg border border-border bg-popover p-1 text-sm text-popover-foreground shadow-xl"
+				>
+					<button type="button" class="menu-item" @click="close()" hx-get={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/view" } hx-target="#modal-root" hx-swap="innerHTML">View</button>
+					<button type="button" class="menu-item" @click="close()" hx-get={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/edit" } hx-target="#modal-root" hx-swap="innerHTML">Edit</button>
+					<button type="button" class="menu-item text-red-600 hover:bg-red-600/10" @click="close()" hx-post={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/delete" } hx-target="#contacts-list" hx-swap="outerHTML" hx-confirm="Delete this contact? It is soft-deleted and purged after two days.">Delete</button>
+					<div class="my-1 border-t border-border"></div>
+					<div class="flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-muted-foreground/60">
+						<span class="flex items-center gap-2">
+							@Icon("shared")
+							<span>Share</span>
+						</span>
+						@Badge("Soon", "muted")
+					</div>
+					<div class="flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-muted-foreground/60">
+						<span class="flex items-center gap-2">
+							@Icon("overview")
+							<span>Details</span>
+						</span>
+						@Badge("Soon", "muted")
+					</div>
+				</div>
+			</div>
+		</td>
+		<td class="px-3 py-2">
 			<button
 				type="button"
-				class="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-				title="Edit contact"
-				hx-get={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/edit" }
+				class="text-left font-medium hover:underline"
+				hx-get={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/view" }
 				hx-target="#modal-root"
 				hx-swap="innerHTML"
-			>
-				@Icon("edit")
-			</button>
+			>{ c.Name }</button>
 		</td>
-		<td class="px-3 py-2 font-medium">{ c.Name }</td>
 		<td class="hidden px-3 py-2 text-muted-foreground sm:table-cell">{ c.Tel }</td>
 		<td class="hidden px-3 py-2 xl:table-cell">
 			<div class="flex flex-wrap gap-1">
@@ -247,6 +337,145 @@ templ addContact() {
 		@Icon("plus")
 		<span>Add contact</span>
 	</button>
+}
+
+// ContactDetail is the read-only view of one contact: a structured name, the
+// grouped property fields, addresses, list membership, and audit stamps.
+type ContactDetail struct {
+	ID        int64
+	Name      string
+	UID       string
+	Filename  string
+	Groups    []DetailGroup
+	Addresses []contact.Address
+	Lists     []string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// DetailGroup is one labelled block of values in the contact view.
+type DetailGroup struct {
+	Label  string
+	Values []string
+}
+
+// ContactIDs extracts the row ids, used to seed the Alpine selection state.
+func ContactIDs(d ContactsData) []int64 {
+	out := make([]int64, 0, len(d.Contacts))
+	for _, c := range d.Contacts {
+		out = append(out, c.Contact.ID)
+	}
+	return out
+}
+
+templ ContactDetailPanel(d ContactDetail) {
+	<div class="space-y-5">
+		<div class="flex items-start justify-between gap-4">
+			<div class="min-w-0">
+				<h2 class="truncate text-lg font-semibold">{ d.Name }</h2>
+				<p class="mt-0.5 truncate text-xs text-muted-foreground">{ d.UID }</p>
+			</div>
+			<button
+				type="button"
+				class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90"
+				hx-get={ "/dashboard/contacts/" + strconv.FormatInt(d.ID, 10) + "/edit" }
+				hx-target="#modal-root"
+				hx-swap="innerHTML"
+			>
+				@Icon("edit")
+				<span>Edit</span>
+			</button>
+		</div>
+		if len(d.Lists) > 0 {
+			<section class="space-y-1">
+				<h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Lists</h3>
+				<div class="flex flex-wrap gap-1">
+					for _, l := range d.Lists {
+						@Chip(l)
+					}
+				</div>
+			</section>
+		}
+		for _, g := range d.Groups {
+			<section class="space-y-1">
+				<h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ g.Label }</h3>
+				<div class="space-y-1">
+					for _, v := range g.Values {
+						<p class="text-sm">{ v }</p>
+					}
+				</div>
+			</section>
+		}
+		if len(d.Addresses) > 0 {
+			<section class="space-y-1">
+				<h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Addresses</h3>
+				<div class="space-y-1">
+					for _, a := range d.Addresses {
+						<p class="text-sm">{ formatAddress(a) }</p>
+					}
+				</div>
+			</section>
+		}
+		<section class="space-y-1 border-t border-border pt-4 text-xs text-muted-foreground">
+			<p>Created { relativeTime(&d.CreatedAt) } · updated { relativeTime(&d.UpdatedAt) }</p>
+			<p class="truncate">{ d.Filename }</p>
+		</section>
+	</div>
+}
+
+// BulkListsModal is the shared modal for the two bulk list operations: mode
+// "add" unions the chosen lists into each selected contact, "set" replaces their
+// lists outright.
+templ BulkListsModal(mode string, ids []int64, books []store.Book) {
+	<form hx-post="/dashboard/contacts/bulk" hx-target="#contacts-list" hx-swap="outerHTML" class="space-y-4">
+		<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+		<input type="hidden" name="action" value={ mode }/>
+		for _, id := range ids {
+			<input type="hidden" name="id" value={ strconv.FormatInt(id, 10) }/>
+		}
+		@MultiSelect("list", "Lists", bookOptions(books), nil, bulkHint(mode))
+		<p class="text-sm text-muted-foreground">{ countLabel(len(ids), "contact") } selected.</p>
+		<div class="flex justify-end pt-2">
+			@PrimaryButton(bulkSubmitLabel(mode))
+		</div>
+	</form>
+}
+
+func bulkHint(mode string) string {
+	if mode == "set" {
+		return "Replaces every selected contact's lists with these."
+	}
+	return "Adds these lists to every selected contact."
+}
+
+func bulkSubmitLabel(mode string) string {
+	if mode == "set" {
+		return "Set lists"
+	}
+	return "Add to lists"
+}
+
+// bulkVals is the hx-vals JSON for a bulk toolbar button.
+func bulkVals(action, csrf string) string {
+	return `{"action":"` + action + `","csrf":"` + csrf + `"}`
+}
+
+func formatAddress(a contact.Address) string {
+	parts := make([]string, 0, 3)
+	if a.Street != "" {
+		parts = append(parts, a.Street)
+	}
+	if city := strings.TrimSpace(a.City + " " + a.Region + " " + a.Postal); city != "" {
+		parts = append(parts, city)
+	}
+	if a.Country != "" {
+		parts = append(parts, a.Country)
+	}
+	s := strings.Join(parts, ", ")
+	if a.Type != "" {
+		s = a.Type + ": " + s
+	}
+	return s
 }
 
 templ ContactForm(d ContactFormData) {
