@@ -34,7 +34,7 @@ type api struct {
 const signupBcryptCost = 12
 
 // New builds the /api/v1 handler.
-func New(users *store.Users, pool *pgxpool.Pool) http.Handler {
+func New(users *store.Users, pool *pgxpool.Pool, opts ...auth.Option) http.Handler {
 	a := &api{users: users, pool: pool}
 	r := chi.NewRouter()
 
@@ -71,7 +71,7 @@ func New(users *store.Users, pool *pgxpool.Pool) http.Handler {
 
 	r.Post("/events/force-resync", a.forceResync)
 
-	authed := auth.RequireDAV(users, store.NewPrincipals(pool), r)
+	authed := auth.RequireDAV(users, store.NewPrincipals(pool), r, opts...)
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == http.MethodPost && req.URL.Path == "/users" {
 			a.signup(w, req)

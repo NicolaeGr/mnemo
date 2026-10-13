@@ -17,6 +17,12 @@ go run ./cmd/server
 On boot the server migrates the schema and, if empty, seeds an `admin` user
 (`admin@example.com` / `password`). It listens on `:8080`.
 
+For testing with a real CardDAV client over plain HTTP, set
+`INSECURE_TOKEN_AUTH=true`. A device can then send its token as the Basic
+password, which is the only credential DAVx5 and Thunderbird can send, since
+neither sets an `Authorization: Bearer` header. The token travels unencrypted,
+so use the flag only on a trusted network.
+
 ## What it exposes
 
 - **CardDAV** at `/carddav/`:

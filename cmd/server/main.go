@@ -48,7 +48,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           web.New(web.Deps{Store: st, Session: sessionManager(cfg)}),
+		Handler:           web.New(web.Deps{Store: st, Session: sessionManager(cfg), InsecureTokenAuth: cfg.InsecureTokenAuth}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

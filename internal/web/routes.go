@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/nicolaegr/mnemo/internal/api"
+	"github.com/nicolaegr/mnemo/internal/auth"
 	"github.com/nicolaegr/mnemo/internal/store"
 	"github.com/nicolaegr/mnemo/internal/web/admin"
 	"github.com/nicolaegr/mnemo/internal/web/webdavsvc"
@@ -14,6 +15,9 @@ import (
 type Deps struct {
 	Store   *store.Store
 	Session *websession.Manager
+	// InsecureTokenAuth lets a device authenticate by its token as the Basic
+	// password. See auth.WithTokenPassword.
+	InsecureTokenAuth bool
 }
 
 // New wires the whole server. CardDAV serves at the root because webdavsvc's
@@ -22,8 +26,9 @@ type Deps struct {
 // both see their own routes after the prefix is chosen here.
 func New(d Deps) http.Handler {
 	users := store.NewUsers(d.Store.PG)
-	dav := webdavsvc.New(users, d.Store.PG)
-	rest := api.New(users, d.Store.PG)
+	authOpts := []auth.Option{auth.WithTokenPassword(d.InsecureTokenAuth)}
+	dav := webdavsvc.New(users, d.Store.PG, authOpts...)
+	rest := api.New(users, d.Store.PG, authOpts...)
 	ui := admin.New(users, d.Store.PG, d.Session)
 	static := http.FileServer(http.Dir("assets"))
 

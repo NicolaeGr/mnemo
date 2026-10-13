@@ -17,18 +17,23 @@ type Config struct {
 	CookieSameSite string
 
 	BcryptCost int
+
+	// InsecureTokenAuth lets a device send its token as the Basic password, for
+	// CardDAV clients that cannot send a Bearer header. Off by default.
+	InsecureTokenAuth bool
 }
 
 func Load() Config {
 	return Config{
-		Addr:           getenv("ADDR", ":8080"),
-		DatabaseURL:    databaseURL(),
-		SessionName:    getenv("SESSION_NAME", "session"),
-		SessionTTL:     72 * time.Hour,
-		SessionSecret:  os.Getenv("SESSION_SECRET"),
-		CookieSecure:   getenv("COOKIE_SECURE", "false") == "true",
-		CookieSameSite: getenv("COOKIE_SAMESITE", "lax"),
-		BcryptCost:     12,
+		Addr:              getenv("ADDR", ":8080"),
+		DatabaseURL:       databaseURL(),
+		SessionName:       getenv("SESSION_NAME", "session"),
+		SessionTTL:        72 * time.Hour,
+		SessionSecret:     os.Getenv("SESSION_SECRET"),
+		CookieSecure:      getenv("COOKIE_SECURE", "false") == "true",
+		CookieSameSite:    getenv("COOKIE_SAMESITE", "lax"),
+		BcryptCost:        12,
+		InsecureTokenAuth: getenv("INSECURE_TOKEN_AUTH", "false") == "true",
 	}
 }
 
