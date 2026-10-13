@@ -200,6 +200,7 @@ func handleSync(w http.ResponseWriter, r *http.Request, b *backend, actor auth.A
 
 	var entries []syncEntry
 	token := ""
+	invalidToken := false
 
 	err := store.WithTx(r.Context(), b.pool, actor, func(s store.ScopedStore) error {
 		var maxID int64
@@ -212,12 +213,32 @@ func handleSync(w http.ResponseWriter, r *http.Request, b *backend, actor auth.A
 		if err != nil {
 			return err
 		}
+		token = fmt.Sprintf("%d-%d", maxID, epoch)
+
+		if strings.TrimSpace(q.Token) == "" {
+			// Initial sync (RFC 6578): report every current member. A client that
+			// trusts this report, DAVx5 among them, would otherwise see an empty
+			// collection and never fetch what was already there.
+			visible, err := resolve.Resolver{}.VisibleBooks(r.Context(), s)
+			if err != nil {
+				return err
+			}
+			refs, err := s.ListVisibleObjectRefs(r.Context(), visibleIDs(visible))
+			if err != nil {
+				return err
+			}
+			for _, ref := range refs {
+				entries = append(entries, syncEntry{filename: ref.Filename, etag: ref.ETag})
+			}
+			return nil
+		}
 
 		lastID, clientEpoch, ok := parseSyncToken(q.Token)
 		if !ok || clientEpoch != epoch {
-			// Unknown token or a tier flip: give the client a fresh token and
-			// let it re-list.
-			token = fmt.Sprintf("%d-%d", maxID, epoch)
+			// A token we cannot honor, including after a tier flip. RFC 6578 says
+			// answer 403 DAV:valid-sync-token so the client re-lists and reconciles
+			// deletions, rather than being told the collection holds nothing.
+			invalidToken = true
 			return nil
 		}
 
@@ -259,6 +280,10 @@ func handleSync(w http.ResponseWriter, r *http.Request, b *backend, actor auth.A
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if invalidToken {
+		writeInvalidSyncToken(w)
+		return
+	}
 
 	ab := addressBookPath(actor.Username)
 	var out strings.Builder
@@ -276,6 +301,13 @@ func handleSync(w http.ResponseWriter, r *http.Request, b *backend, actor auth.A
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.WriteHeader(http.StatusMultiStatus)
 	_, _ = w.Write([]byte(out.String()))
+}
+
+func writeInvalidSyncToken(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = io.WriteString(w, `<?xml version="1.0" encoding="utf-8"?>
+<d:error xmlns:d="DAV:"><d:valid-sync-token/></d:error>`)
 }
 
 func parseSyncToken(tok string) (int64, int64, bool) {
