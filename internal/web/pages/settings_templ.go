@@ -223,7 +223,7 @@ func SettingsBookForm(books []store.Book, defaultID *int64, errMsg, target strin
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = SelectField("Default book", "default_book_id", defaultBookValue(defaultID), activeBookOptions(books)).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = SelectField("Default list", "default_book_id", defaultBookValue(defaultID), activeBookOptions(books)).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

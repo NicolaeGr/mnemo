@@ -15,6 +15,7 @@ type ContactView struct {
 	Name    string
 	Tel     string
 	Email   string
+	Org     string
 	Books   map[int64]bool
 }
 
@@ -70,73 +71,182 @@ func contactEditorData(d ContactFormData) string {
 	return string(data)
 }
 
-templ ContactsPage(contacts []ContactView, books []store.Book, q, errMsg string) {
+// ContactsData is everything the contacts page and its rows fragment need.
+type ContactsData struct {
+	Contacts []ContactView
+	Books    []store.Book
+	Q        string
+	Sort     string
+	Dir      string
+	Page     int
+	Per      int
+	Total    int
+	BookID   string
+	BookName string
+	ErrMsg   string
+}
+
+func contactsViewData(d ContactsData) string {
+	data, _ := json.Marshal(map[string]any{
+		"q":        d.Q,
+		"sort":     d.Sort,
+		"dir":      d.Dir,
+		"page":     d.Page,
+		"per":      d.Per,
+		"total":    d.Total,
+		"book":     d.BookID,
+		"endpoint": "/dashboard/contacts/search",
+		"target":   "#contacts-rows",
+	})
+	return string(data)
+}
+
+templ ContactsPage(d ContactsData) {
 	<div class="space-y-6">
-		<div class="flex items-end justify-between gap-4">
-			<div class="space-y-2">
-				<h1 class="text-xl font-semibold tracking-tight">Contacts</h1>
+		@PageHeader("Contacts", countLabel(d.Total, "contact"), addContact())
+		@ContactsList(d)
+	</div>
+}
+
+// ContactsList is the swap target for contact mutations (the edit form points
+// here), separate from the page chrome above it.
+templ ContactsList(d ContactsData) {
+	<div id="contacts-list">
+		@ContactTable(d)
+	</div>
+}
+
+// ContactTable is the Alpine-driven list region. The search box and table head
+// stay mounted while the controller swaps only #contacts-rows.
+templ ContactTable(d ContactsData) {
+	<div x-data={ "listView(" + contactsViewData(d) + ")" } @listmeta.window="onMeta($event)" class="space-y-4">
+		<div class="flex flex-wrap items-center gap-3">
+			<div class="relative min-w-[16rem] max-w-md flex-1">
+				<span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+					@Icon("search")
+				</span>
 				<input
 					type="search"
-					name="q"
-					value={ q }
-					placeholder="Search by name, org, or phone"
-					hx-get="/dashboard/contacts/search"
-					hx-target="#contacts-list"
-					hx-swap="outerHTML"
-					hx-trigger="keyup changed delay:300ms, search"
-					class="h-9 w-64 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"
+					x-model="q"
+					placeholder="Search name, organization, or phone"
+					class="h-9 w-full rounded-md border border-input bg-background pl-9 pr-9 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"
 				/>
+				<span x-show="loading" x-cloak class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+					@Icon("spinner")
+				</span>
 			</div>
+			if d.BookName != "" {
+				<a href="/dashboard/contacts" class="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs transition-colors hover:bg-border" title="Clear list filter">
+					in { d.BookName }
+					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+				</a>
+			}
+			<span class="ml-auto text-sm text-muted-foreground"><span x-text="countLabel"></span></span>
+		</div>
+		<div class="overflow-hidden rounded-lg border border-border">
+			<table class="w-full text-sm">
+				<thead class="border-b border-border bg-muted/40">
+					<tr>
+						<th scope="col" class="w-px px-3 py-2"><span class="sr-only">Actions</span></th>
+						@SortableTh("name", "Name", "")
+						<th scope="col" class="hidden px-3 py-2 text-left text-xs font-medium text-muted-foreground sm:table-cell">Phone</th>
+						<th scope="col" class="hidden px-3 py-2 text-left text-xs font-medium text-muted-foreground xl:table-cell">Lists</th>
+						@SortableTh("org", "Organization", "hidden lg:table-cell")
+						<th scope="col" class="hidden px-3 py-2 text-left text-xs font-medium text-muted-foreground sm:table-cell">Email</th>
+						@SortableTh("updated", "Updated", "hidden lg:table-cell")
+					</tr>
+				</thead>
+				<tbody id="contacts-rows" class="divide-y divide-border">
+					@ContactRows(d)
+				</tbody>
+			</table>
+		</div>
+		<div class="flex items-center justify-between gap-2">
+			<p class="text-xs text-muted-foreground">Page <span x-text="page"></span> of <span x-text="pages"></span></p>
+			<div class="flex gap-2" x-show="pages > 1">
+				<button type="button" @click="go(page - 1)" :disabled="!hasPrev" class="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40">Previous</button>
+				<button type="button" @click="go(page + 1)" :disabled="!hasNext" class="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40">Next</button>
+			</div>
+		</div>
+	</div>
+}
+
+// ContactRows is the tbody content, rendered both into the full page and as the
+// htmx response that replaces #contacts-rows.
+templ ContactRows(d ContactsData) {
+	if d.ErrMsg != "" {
+		<tr>
+			<td colspan="7" class="px-3 py-4">
+				@ErrorBanner(d.ErrMsg)
+			</td>
+		</tr>
+	} else if len(d.Contacts) == 0 {
+		<tr>
+			<td colspan="7">
+				@contactsEmpty(d)
+			</td>
+		</tr>
+	} else {
+		for _, c := range d.Contacts {
+			@ContactRow(c, d.Books)
+		}
+	}
+}
+
+templ ContactRow(c ContactView, books []store.Book) {
+	<tr class="hover:bg-muted/40">
+		<td class="w-px px-3 py-2">
 			<button
 				type="button"
-				class="inline-flex h-9 items-center rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90"
-				hx-get="/dashboard/contacts/new"
+				class="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+				title="Edit contact"
+				hx-get={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/edit" }
 				hx-target="#modal-root"
 				hx-swap="innerHTML"
-			>Add contact</button>
-		</div>
-		@ContactList(contacts, books, errMsg)
-	</div>
-}
-
-templ ContactList(contacts []ContactView, books []store.Book, errMsg string) {
-	<div id="contacts-list" class="space-y-3">
-		if errMsg != "" {
-			@ErrorBanner(errMsg)
-		}
-		if len(contacts) == 0 {
-			<p class="text-sm text-muted-foreground">No contacts.</p>
-		} else {
-			for _, c := range contacts {
-				@ContactCard(c, books)
-			}
-		}
-	</div>
-}
-
-templ ContactCard(c ContactView, books []store.Book) {
-	<div class="flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-4 py-3">
-		<div class="min-w-0">
-			<div class="flex flex-wrap items-baseline gap-2">
-				<span class="font-medium">{ c.Name }</span>
-				<span class="text-xs text-muted-foreground">{ c.Contact.UID }</span>
-			</div>
-			<div class="mt-1 flex flex-wrap gap-1">
+			>
+				@Icon("edit")
+			</button>
+		</td>
+		<td class="px-3 py-2 font-medium">{ c.Name }</td>
+		<td class="hidden px-3 py-2 text-muted-foreground sm:table-cell">{ c.Tel }</td>
+		<td class="hidden px-3 py-2 xl:table-cell">
+			<div class="flex flex-wrap gap-1">
 				for _, b := range books {
 					if c.Books[b.ID] {
-						<span class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{ b.DisplayName }</span>
+						@Chip(b.DisplayName)
 					}
 				}
 			</div>
-		</div>
-		<button
-			type="button"
-			class="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted"
-			hx-get={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/edit" }
-			hx-target="#modal-root"
-			hx-swap="innerHTML"
-		>Edit</button>
-	</div>
+		</td>
+		<td class="hidden px-3 py-2 text-muted-foreground lg:table-cell">{ c.Org }</td>
+		<td class="hidden px-3 py-2 text-muted-foreground sm:table-cell">{ c.Email }</td>
+		<td class="hidden px-3 py-2 text-xs text-muted-foreground lg:table-cell">{ relativeTime(&c.Contact.UpdatedAt) }</td>
+	</tr>
+}
+
+templ contactsEmpty(d ContactsData) {
+	if d.Q != "" {
+		@EmptyState("No matches", "Nothing matched \u201c"+d.Q+"\u201d in your contacts.", clearSearchLink())
+	} else {
+		@EmptyState("No contacts yet", "Add your first contact to get started.", addContact())
+	}
+}
+
+templ clearSearchLink() {
+	<a href="/dashboard/contacts" class="inline-flex h-9 items-center rounded-md border border-border px-3 text-sm transition-colors hover:bg-muted">Clear search</a>
+}
+
+templ addContact() {
+	<button
+		type="button"
+		class="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90"
+		hx-get="/dashboard/contacts/new"
+		hx-target="#modal-root"
+		hx-swap="innerHTML"
+	>
+		@Icon("plus")
+		<span>Add contact</span>
+	</button>
 }
 
 templ ContactForm(d ContactFormData) {
@@ -322,7 +432,7 @@ templ ContactForm(d ContactFormData) {
 		</div>
 		<hr class="border-border"/>
 		<section class="space-y-2">
-			@MultiSelect("book", "Books", bookOptions(d.Books), d.Selected, "")
+			@MultiSelect("book", "Lists", bookOptions(d.Books), d.Selected, "")
 		</section>
 		if d.ID != 0 {
 			<p class="text-xs text-muted-foreground">{ d.UID } · { d.Filename }</p>

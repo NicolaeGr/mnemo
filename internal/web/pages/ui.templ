@@ -1,0 +1,126 @@
+package pages
+
+// This file holds the small presentation primitives every page composes. Keeping
+// them here (rather than inline per page) is what lets the list pages share one
+// look without copy-paste.
+templ Icon(name string) {
+	switch name {
+		case "overview":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1"></rect><rect x="14" y="3" width="7" height="5" rx="1"></rect><rect x="14" y="12" width="7" height="9" rx="1"></rect><rect x="3" y="16" width="7" height="5" rx="1"></rect></svg>
+		case "contacts":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+		case "lists":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M3 6h.01"></path><path d="M3 12h.01"></path><path d="M3 18h.01"></path></svg>
+		case "devices":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"></rect><path d="M12 18h.01"></path></svg>
+		case "groups":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+		case "shared":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.59 13.51 6.83 3.98"></path><path d="m15.41 6.51-6.82 3.98"></path></svg>
+		case "bell":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+		case "plus":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+		case "search":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+		case "chevron":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+		case "chevron-left":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+		case "arrow-right":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>
+		case "edit":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+		case "sun":
+			<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
+		case "spinner":
+			<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+	}
+}
+
+// PageHeader is the title block every page opens with: a heading, an optional
+// subtitle (counts, hints), and an action slot the caller fills in.
+templ PageHeader(title, subtitle string, actions templ.Component) {
+	<div class="flex flex-wrap items-end justify-between gap-4">
+		<div class="min-w-0">
+			<h1 class="text-2xl font-semibold tracking-tight">{ title }</h1>
+			if subtitle != "" {
+				<p class="mt-1 text-sm text-muted-foreground">{ subtitle }</p>
+			}
+		</div>
+		if actions != nil {
+			<div class="flex items-center gap-2">
+				@actions
+			</div>
+		}
+	</div>
+}
+
+// Badge is a small status pill. tone picks the colour: muted (default), accent,
+// danger, or success.
+templ Badge(label, tone string) {
+	<span class={ "inline-flex items-center rounded-full px-2 py-0.5 text-xs", badgeClass(tone) }>{ label }</span>
+}
+
+func badgeClass(tone string) string {
+	switch tone {
+	case "accent":
+		return "bg-accent/15 text-accent"
+	case "danger":
+		return "bg-red-600/10 text-red-600"
+	case "success":
+		return "bg-emerald-600/10 text-emerald-600"
+	default:
+		return "bg-muted text-muted-foreground"
+	}
+}
+
+// Chip is a compact tag with no status colouring, used for list membership.
+templ Chip(label string) {
+	<span class="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{ label }</span>
+}
+
+// EmptyState is the shared "nothing here yet" block: a title, a hint, and an
+// optional call to action.
+templ EmptyState(title, hint string, action templ.Component) {
+	<div class="flex flex-col items-center justify-center gap-1 px-6 py-12 text-center">
+		<p class="text-sm font-medium">{ title }</p>
+		if hint != "" {
+			<p class="max-w-sm text-sm text-muted-foreground">{ hint }</p>
+		}
+		if action != nil {
+			<div class="mt-3">
+				@action
+			</div>
+		}
+	</div>
+}
+
+// SortableTh is a table header whose button drives the page's Alpine list
+// controller: a click sets the sort field (flipping direction on repeat) and the
+// controller debounces an htmx request. The arrow is always shown so the column
+// reads as sortable; only the active column is emphasised.
+templ SortableTh(field, label, class string) {
+	<th scope="col" class={ "px-3 py-2 text-left text-xs font-medium text-muted-foreground " + class }>
+		<button
+			type="button"
+			class="inline-flex items-center gap-1 transition-colors hover:text-foreground"
+			:class={ "sort === '" + field + "' && 'text-foreground'" }
+			@click={ "sortBy('" + field + "')" }
+			:aria-sort={ "ariaSort('" + field + "')" }
+		>
+			{ label }
+			<svg
+				class="h-3 w-3 transition-transform"
+				:class={ "sort === '" + field + "' ? 'opacity-100' + (dir === 'asc' ? ' rotate-180' : '') : 'opacity-40'" }
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				aria-hidden="true"
+			><path d="m6 9 6 6 6-6"></path></svg>
+		</button>
+	</th>
+}

@@ -35,27 +35,27 @@ func RootSegment(child templ.Component) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(seg.PageTitle(ctx))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/layouts/root.templ`, Line: 14, Col: 30}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/layouts/root.templ`, Line: 15, Col: 30}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title><style>[x-cloak]{display:none !important}</style><link rel=\"stylesheet\" href=\"/static/output.css\"><script src=\"/static/theme.js\"></script><script defer src=\"https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js\"></script><script defer src=\"https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js\"></script><script type=\"module\" src=\"https://unpkg.com/@oddbird/css-anchor-positioning\"></script><script src=\"/static/app.js\" defer></script></head><body data-stack=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title><style>[x-cloak]{display:none !important}</style><link rel=\"stylesheet\" href=\"/static/output.css\"><script src=\"/static/theme.js\"></script><script defer src=\"https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js\"></script><!-- app.js must define its Alpine factories (shell, listView, ...) before\n\t\t\t     Alpine starts, so it loads ahead of the Alpine bundle. --><script defer src=\"/static/app.js\"></script><script defer src=\"https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js\"></script><script type=\"module\" src=\"https://unpkg.com/@oddbird/css-anchor-positioning\"></script></head><body data-stack=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(stackAttr(seg.StackIDs(ctx)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/layouts/root.templ`, Line: 23, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/layouts/root.templ`, Line: 26, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 		if templ_7745c5c3_Err != nil {

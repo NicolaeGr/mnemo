@@ -11,7 +11,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -54,8 +56,9 @@ func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) ht
 
 	mux.Handle("GET /dashboard", a.dashPage("Overview", a.overviewLeaf))
 
-	mux.Handle("GET /dashboard/books", a.dashPage("Books", a.booksLeaf))
+	mux.Handle("GET /dashboard/books", a.dashPage("Lists", a.booksLeaf))
 	mux.Handle("GET /dashboard/books/slug", a.requireSession(http.HandlerFunc(a.bookSlugCheck)))
+	mux.Handle("GET /dashboard/books/grid", a.requireSession(http.HandlerFunc(a.booksGrid)))
 	mux.Handle("GET /dashboard/books/new", a.modal(a.bookAddModal))
 	mux.Handle("GET /dashboard/books/{id}/edit", a.modal(a.bookEditModal))
 	mux.Handle("POST /dashboard/books", a.mutate(http.HandlerFunc(a.createBook)))
@@ -63,6 +66,7 @@ func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) ht
 	mux.Handle("POST /dashboard/books/{id}/delete", a.mutate(http.HandlerFunc(a.deleteBook)))
 
 	mux.Handle("GET /dashboard/devices", a.dashPage("Devices", a.devicesLeaf))
+	mux.Handle("GET /dashboard/devices/rows", a.requireSession(http.HandlerFunc(a.devicesRows)))
 	mux.Handle("GET /dashboard/devices/new", a.modal(a.deviceAddModal))
 	mux.Handle("GET /dashboard/devices/{id}/edit", a.modal(a.deviceEditModal))
 	mux.Handle("POST /dashboard/devices", a.mutate(http.HandlerFunc(a.createDevice)))
@@ -119,7 +123,7 @@ func (a *Admin) authStack(next http.Handler) http.Handler {
 // (and its stylesheet).
 func (a *Admin) dashPage(title string, leaf func(r *http.Request) templ.Component) http.Handler {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seg.PageWith(w, r, title, leaf(r), layouts.SidebarNavOOB())
+		seg.PageWith(w, r, title, leaf(r), layouts.SidebarNavOOB(), layouts.HeaderTitleOOB(title))
 	})
 	return a.requireSession(seg.Use(rootSeg)(seg.Use(dashSeg)(h)))
 }
@@ -176,26 +180,143 @@ func (a *Admin) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Admin) overviewLeaf(r *http.Request) templ.Component {
+	ctx := r.Context()
+	userID := uictx.From(ctx).UserID
 	var books, devices, contacts int
-	err := a.pool.QueryRow(r.Context(), `
+	err := a.pool.QueryRow(ctx, `
 		SELECT (SELECT count(*) FROM books WHERE owner_user_id = $1 AND is_active),
 		       (SELECT count(*) FROM principals WHERE user_id = $1),
 		       (SELECT count(*) FROM contacts WHERE user_id = $1 AND deleted_at IS NULL)`,
-		uictx.From(r.Context()).UserID).Scan(&books, &devices, &contacts)
+		userID).Scan(&books, &devices, &contacts)
 	if err != nil {
 		return pages.ErrorBanner(err.Error())
 	}
-	return pages.Overview(books, devices, contacts)
+	activity, err := a.recentActivity(ctx, userID, 8)
+	if err != nil {
+		return pages.ErrorBanner(err.Error())
+	}
+	statuses, err := a.deviceStatuses(ctx, userID)
+	if err != nil {
+		return pages.ErrorBanner(err.Error())
+	}
+	return pages.Overview(pages.OverviewData{
+		Contacts:       contacts,
+		Lists:          books,
+		Devices:        devices,
+		Activity:       activity,
+		DeviceStatuses: statuses,
+	})
+}
+
+// recentActivity reads the per-user change log, naming each changed contact.
+func (a *Admin) recentActivity(ctx context.Context, userID int64, limit int) ([]pages.ActivityItem, error) {
+	rows, err := a.pool.Query(ctx, `
+		SELECT coalesce(c.search_meta->>'fn', cc.filename), cc.change_type, cc.changed_at
+		  FROM contact_changes cc
+		  LEFT JOIN contacts c ON c.user_id = cc.user_id AND c.filename = cc.filename
+		 WHERE cc.user_id = $1
+		 ORDER BY cc.id DESC
+		 LIMIT $2`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]pages.ActivityItem, 0, limit)
+	for rows.Next() {
+		var name, kind string
+		var at time.Time
+		if err := rows.Scan(&name, &kind, &at); err != nil {
+			return nil, err
+		}
+		items = append(items, pages.ActivityItem{Name: name, Kind: activityVerb(kind), At: at})
+	}
+	return items, rows.Err()
+}
+
+func activityVerb(kind string) string {
+	if kind == "delete" {
+		return "removed"
+	}
+	return "updated"
+}
+
+func (a *Admin) deviceStatuses(ctx context.Context, userID int64) ([]pages.DeviceStatus, error) {
+	rows, err := a.pool.Query(ctx, `
+		SELECT label, tier, last_synced_at FROM principals
+		 WHERE user_id = $1 ORDER BY label`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]pages.DeviceStatus, 0)
+	for rows.Next() {
+		var d pages.DeviceStatus
+		if err := rows.Scan(&d.Label, &d.Tier, &d.LastSeen); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 // --- books ---
 
 func (a *Admin) booksLeaf(r *http.Request) templ.Component {
-	books, err := a.listBooks(r)
+	data, err := a.listsData(r, r.URL.Query().Get("sort"))
 	if err != nil {
-		return pages.BooksPage(nil, err.Error())
+		return pages.ListsPage(pages.ListsData{ErrMsg: err.Error()})
 	}
-	return pages.BooksPage(books, "")
+	return pages.ListsPage(data)
+}
+
+// booksGrid re-renders just the card grid for a sort change.
+func (a *Admin) booksGrid(w http.ResponseWriter, r *http.Request) {
+	data, err := a.listsData(r, r.URL.Query().Get("sort"))
+	if err != nil {
+		data.ErrMsg = err.Error()
+	}
+	renderTempl(w, r, pages.ListGrid(data))
+}
+
+func (a *Admin) listsData(r *http.Request, sortKey string) (pages.ListsData, error) {
+	summaries, err := a.bookSummaries(r)
+	if err != nil {
+		return pages.ListsData{}, err
+	}
+	sortBookSummaries(summaries, sortKey)
+	return pages.ListsData{Summaries: summaries, Sort: normalizeListSort(sortKey)}, nil
+}
+
+func (a *Admin) bookSummaries(r *http.Request) ([]store.BookSummary, error) {
+	var out []store.BookSummary
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		var e error
+		out, e = s.ListBookSummaries(r.Context(), 6)
+		return e
+	})
+	return out, err
+}
+
+func normalizeListSort(s string) string {
+	if s == "contacts" {
+		return "contacts"
+	}
+	return "name"
+}
+
+func sortBookSummaries(s []store.BookSummary, key string) {
+	if normalizeListSort(key) == "contacts" {
+		sort.SliceStable(s, func(i, j int) bool {
+			if s[i].ContactCount != s[j].ContactCount {
+				return s[i].ContactCount > s[j].ContactCount
+			}
+			return s[i].Book.DisplayName < s[j].Book.DisplayName
+		})
+		return
+	}
+	sort.SliceStable(s, func(i, j int) bool {
+		return s[i].Book.DisplayName < s[j].Book.DisplayName
+	})
 }
 
 func (a *Admin) bookSlugCheck(w http.ResponseWriter, r *http.Request) {
@@ -215,15 +336,15 @@ func (a *Admin) bookSlugCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Admin) bookAddModal(r *http.Request) (string, templ.Component) {
-	return "Add book", pages.BookForm(nil)
+	return "New list", pages.BookForm(nil)
 }
 
 func (a *Admin) bookEditModal(r *http.Request) (string, templ.Component) {
 	b, err := a.getBook(r, r.PathValue("id"))
 	if err != nil {
-		return "Edit book", pages.ErrorBanner(err.Error())
+		return "Edit list", pages.ErrorBanner(err.Error())
 	}
-	return "Edit book", pages.BookForm(&b)
+	return "Edit list", pages.BookForm(&b)
 }
 
 func (a *Admin) createBook(w http.ResponseWriter, r *http.Request) {
@@ -294,13 +415,14 @@ func (a *Admin) deleteBook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Admin) renderBookList(w http.ResponseWriter, r *http.Request, cause error) {
-	msg := errorText(cause)
-	books, err := a.listBooks(r)
+	data, err := a.listsData(r, "")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		data = pages.ListsData{ErrMsg: err.Error()}
 	}
-	renderTempl(w, r, pages.BookList(books, msg), seg.ClearModal())
+	if cause != nil {
+		data.ErrMsg = cause.Error()
+	}
+	renderTempl(w, r, pages.ListGrid(data), seg.ClearModal())
 }
 
 func (a *Admin) listBooks(r *http.Request) ([]store.Book, error) {
@@ -332,9 +454,71 @@ func (a *Admin) getBook(r *http.Request, raw string) (store.Book, error) {
 func (a *Admin) devicesLeaf(r *http.Request) templ.Component {
 	views, _, err := a.deviceViews(r)
 	if err != nil {
-		return pages.DevicesPage(nil, err.Error())
+		return pages.DevicesPage(pages.DevicesData{ErrMsg: err.Error()})
 	}
-	return pages.DevicesPage(views, "")
+	sortKey, dir := deviceQuery(r)
+	sortDeviceViews(views, sortKey, dir)
+	return pages.DevicesPage(pages.DevicesData{Devices: views, Sort: sortKey, Dir: dir})
+}
+
+// devicesRows re-renders just the table body for a sort change.
+func (a *Admin) devicesRows(w http.ResponseWriter, r *http.Request) {
+	views, _, err := a.deviceViews(r)
+	sortKey, dir := deviceQuery(r)
+	var data pages.DevicesData
+	if err != nil {
+		data.ErrMsg = err.Error()
+	} else {
+		sortDeviceViews(views, sortKey, dir)
+		data = pages.DevicesData{Devices: views, Sort: sortKey, Dir: dir}
+	}
+	w.Header().Set("HX-Trigger", fmt.Sprintf(`{"listmeta":{"total":%d,"page":1}}`, len(data.Devices)))
+	renderTempl(w, r, pages.DeviceRows(data))
+}
+
+func deviceQuery(r *http.Request) (sortKey, dir string) {
+	sortKey = r.URL.Query().Get("sort")
+	switch sortKey {
+	case "tier", "last":
+	default:
+		sortKey = "label"
+	}
+	dir = "asc"
+	if r.URL.Query().Get("dir") == "desc" {
+		dir = "desc"
+	}
+	return sortKey, dir
+}
+
+func sortDeviceViews(views []pages.DeviceView, key, dir string) {
+	var less func(i, j int) bool
+	switch key {
+	case "tier":
+		less = func(i, j int) bool { return views[i].Principal.Tier < views[j].Principal.Tier }
+	case "last":
+		less = func(i, j int) bool {
+			return lastSyncBefore(views[i].Principal.LastSyncedAt, views[j].Principal.LastSyncedAt)
+		}
+	default:
+		less = func(i, j int) bool { return views[i].Principal.Label < views[j].Principal.Label }
+	}
+	if dir == "desc" {
+		asc := less
+		less = func(i, j int) bool { return asc(j, i) }
+	}
+	sort.SliceStable(views, less)
+}
+
+// lastSyncBefore orders devices by recency; a device that has never synced
+// sorts last in ascending order.
+func lastSyncBefore(a, b *time.Time) bool {
+	if a == nil {
+		return false
+	}
+	if b == nil {
+		return true
+	}
+	return a.Before(*b)
 }
 
 func (a *Admin) deviceAddModal(r *http.Request) (string, templ.Component) {
@@ -465,13 +649,15 @@ func (a *Admin) deleteDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Admin) renderDeviceList(w http.ResponseWriter, r *http.Request, newToken string, cause error) {
-	msg := errorText(cause)
 	views, _, err := a.deviceViews(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	parts := []templ.Component{pages.DeviceList(views, msg)}
+	sortKey, dir := deviceQuery(r)
+	sortDeviceViews(views, sortKey, dir)
+	data := pages.DevicesData{Devices: views, Sort: sortKey, Dir: dir, ErrMsg: errorText(cause)}
+	parts := []templ.Component{pages.DeviceList(data)}
 	if newToken != "" {
 		parts = append(parts, pages.TokenNoticeOOB(newToken))
 	}
@@ -482,21 +668,18 @@ func (a *Admin) renderDeviceList(w http.ResponseWriter, r *http.Request, newToke
 // --- contacts ---
 
 func (a *Admin) contactsLeaf(r *http.Request) templ.Component {
-	q := r.URL.Query().Get("q")
-	views, books, err := a.contactViews(r, q)
-	if err != nil {
-		return pages.ContactsPage(nil, nil, q, err.Error())
-	}
-	return pages.ContactsPage(views, books, q, "")
+	data, err := a.contactsData(r, contactQueryFrom(r))
+	data.ErrMsg = errorText(err)
+	return pages.ContactsPage(data)
 }
 
+// searchContacts renders only the rows for an htmx search, sort, or page change.
+// The HX-Trigger payload lets the Alpine controller refresh the count and pager.
 func (a *Admin) searchContacts(w http.ResponseWriter, r *http.Request) {
-	views, books, err := a.contactViews(r, r.URL.Query().Get("q"))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	renderTempl(w, r, pages.ContactList(views, books, ""))
+	data, err := a.contactsData(r, contactQueryFrom(r))
+	data.ErrMsg = errorText(err)
+	w.Header().Set("HX-Trigger", fmt.Sprintf(`{"listmeta":{"total":%d,"page":%d}}`, data.Total, data.Page))
+	renderTempl(w, r, pages.ContactRows(data))
 }
 
 func (a *Admin) contactAddModal(r *http.Request) (string, templ.Component) {
@@ -575,19 +758,95 @@ func (a *Admin) contactFormData(r *http.Request, id int64) (pages.ContactFormDat
 	return d, err
 }
 
-func (a *Admin) contactViews(r *http.Request, q string) ([]pages.ContactView, []store.Book, error) {
+// contactQuery is the parsed query string of the contacts list.
+type contactQuery struct {
+	q      string
+	bookID *int64
+	sort   string
+	dir    string
+	page   int
+}
+
+const contactPer = 50
+
+func contactQueryFrom(r *http.Request) contactQuery {
+	values := r.URL.Query()
+	out := contactQuery{
+		q:    values.Get("q"),
+		sort: values.Get("sort"),
+		dir:  values.Get("dir"),
+		page: atoiDefault(values.Get("page"), 1),
+	}
+	switch out.sort {
+	case "org", "updated", "created":
+	default:
+		out.sort = "name"
+	}
+	if out.dir != "desc" {
+		out.dir = "asc"
+	}
+	if v := values.Get("book"); v != "" {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			out.bookID = &id
+		}
+	}
+	return out
+}
+
+func atoiDefault(s string, def int) int {
+	if n, err := strconv.Atoi(s); err == nil && n > 0 {
+		return n
+	}
+	return def
+}
+
+// contactsData runs the search and assembles everything the page needs. The
+// search error is returned separately so the caller decides how to show it.
+func (a *Admin) contactsData(r *http.Request, qry contactQuery) (pages.ContactsData, error) {
+	views, books, total, err := a.contactViews(r, qry)
+	data := pages.ContactsData{
+		Contacts: views,
+		Books:    books,
+		Q:        qry.q,
+		Sort:     qry.sort,
+		Dir:      qry.dir,
+		Page:     qry.page,
+		Per:      contactPer,
+		Total:    total,
+	}
+	if qry.bookID != nil {
+		data.BookID = strconv.FormatInt(*qry.bookID, 10)
+		for _, b := range books {
+			if b.ID == *qry.bookID {
+				data.BookName = b.DisplayName
+			}
+		}
+	}
+	return data, err
+}
+
+func (a *Admin) contactViews(r *http.Request, qry contactQuery) ([]pages.ContactView, []store.Book, int, error) {
 	var views []pages.ContactView
 	var active []store.Book
+	total := 0
 	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
 		books, err := s.ListBooks(r.Context())
 		if err != nil {
 			return err
 		}
 		active = activeBooks(books)
-		res, err := s.Search(r.Context(), store.SearchParams{Query: q, Per: 50})
+		res, err := s.Search(r.Context(), store.SearchParams{
+			Query:  qry.q,
+			BookID: qry.bookID,
+			Page:   qry.page,
+			Per:    contactPer,
+			Sort:   qry.sort,
+			Dir:    qry.dir,
+		})
 		if err != nil {
 			return err
 		}
+		total = res.Total
 		views = make([]pages.ContactView, 0, len(res.Contacts))
 		for _, c := range res.Contacts {
 			ids, err := s.ContactBookIDs(r.Context(), c.ID)
@@ -602,12 +861,12 @@ func (a *Admin) contactViews(r *http.Request, q string) ([]pages.ContactView, []
 		}
 		return nil
 	})
-	return views, active, err
+	return views, active, total, err
 }
 
 func contactView(c store.Contact, tagged map[int64]bool) pages.ContactView {
-	name, tel, email := cardFields(c)
-	return pages.ContactView{Contact: c, Name: name, Tel: tel, Email: email, Books: tagged}
+	name, tel, email, org := cardFields(c)
+	return pages.ContactView{Contact: c, Name: name, Tel: tel, Email: email, Org: org, Books: tagged}
 }
 
 func (a *Admin) createContact(w http.ResponseWriter, r *http.Request) {
@@ -711,13 +970,13 @@ func (a *Admin) deleteContact(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Admin) renderContactList(w http.ResponseWriter, r *http.Request, cause error) {
-	msg := errorText(cause)
-	views, books, err := a.contactViews(r, "")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	data, err := a.contactsData(r, contactQueryFrom(r))
+	if cause != nil {
+		data.ErrMsg = cause.Error()
+	} else {
+		data.ErrMsg = errorText(err)
 	}
-	renderTempl(w, r, pages.ContactList(views, books, msg), seg.ClearModal())
+	renderTempl(w, r, pages.ContactsList(data), seg.ClearModal())
 }
 
 func (a *Admin) desiredBooks(r *http.Request) ([]int64, error) {
@@ -836,16 +1095,16 @@ func (a *Admin) saveSettings(w http.ResponseWriter, r *http.Request) {
 
 // cardFields reads the display fields the edit form prefills; the name falls
 // back to the UID.
-func cardFields(c store.Contact) (name, tel, email string) {
+func cardFields(c store.Contact) (name, tel, email, org string) {
 	card, err := vcard.NewDecoder(bytes.NewBufferString(c.VCardText)).Decode()
 	if err != nil {
-		return c.UID, "", ""
+		return c.UID, "", "", ""
 	}
 	name = card.Value(vcard.FieldFormattedName)
 	if name == "" {
 		name = c.UID
 	}
-	return name, card.Value(vcard.FieldTelephone), card.Value(vcard.FieldEmail)
+	return name, card.Value(vcard.FieldTelephone), card.Value(vcard.FieldEmail), card.Value(vcard.FieldOrganization)
 }
 
 // contactFormFromRequest reads the structured editor form.

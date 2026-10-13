@@ -159,6 +159,73 @@ h3 {
     color: var(--color-foreground);
 }
 
+/* The app frame is exactly one viewport tall and clips; the sidebar is a real
+   flex column inside it (full height by stretch) and only the main area
+   scrolls. Below md the sidebar becomes an off-canvas drawer. */
+.app-shell {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+}
+.app-sidebar {
+    --sidebar-w: 15rem;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    width: var(--sidebar-w);
+    transform: translateX(-100%);
+    transition:
+        transform 180ms ease,
+        width 180ms ease;
+}
+.app-sidebar.is-open {
+    transform: translateX(0);
+}
+@media (min-width: 768px) {
+    .app-sidebar {
+        position: static;
+        z-index: auto;
+        transform: none;
+        transition: width 180ms ease;
+    }
+    .app-sidebar.is-collapsed {
+        --sidebar-w: 4.5rem;
+    }
+    .app-sidebar.is-collapsed .nav-label,
+    .app-sidebar.is-collapsed .nav-section,
+    .app-sidebar.is-collapsed .brand-text,
+    .app-sidebar.is-collapsed .user-meta {
+        display: none;
+    }
+    .app-sidebar.is-collapsed .nav-item {
+        justify-content: center;
+        padding-left: 0;
+        padding-right: 0;
+    }
+    .app-sidebar.is-collapsed .brand {
+        justify-content: center;
+    }
+}
+
+/* A request in flight gets a progress cursor everywhere, so htmx interactions
+   never look inert. */
+body.htmx-busy,
+body.htmx-busy * {
+    cursor: progress !important;
+}
+
+/* Thin scrollbars inside the list preview boxes. */
+.overflow-y-auto::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.overflow-y-auto::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 999px;
+}
+
 body[data-stack~="auth"] {
     overflow: hidden;
 }
@@ -244,26 +311,16 @@ body[data-stack~="auth"] {
 .popover-user-trigger {
     anchor-name: --user-menu-trigger;
 }
-.popover-notifs-trigger {
-    anchor-name: --notifs-trigger;
-}
 
-#user-menu,
-#notifs-popover {
+#user-menu {
     position: absolute;
     position-try-fallbacks: flip-block;
     margin: 0.5rem;
-    background: var(--popover);
-    color: var(--popover-foreground);
-    border: 1px solid var(--border);
+    background: var(--color-popover);
+    color: var(--color-popover-foreground);
+    border: 1px solid var(--color-border);
     border-radius: var(--radius);
     box-shadow: 0 16px 48px rgb(0 0 0 / 0.18);
-}
-#user-menu {
     position-anchor: --user-menu-trigger;
     position-area: top span-left;
-}
-#notifs-popover {
-    position-anchor: --notifs-trigger;
-    position-area: bottom span-right;
 }

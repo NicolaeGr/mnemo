@@ -1,24 +1,118 @@
 package pages
 
-import "strconv"
+import (
+	"strconv"
+	"time"
+)
 
-templ Overview(books, devices, contacts int) {
+// OverviewData is the dashboard's snapshot: headline counts, a short activity
+// feed derived from the change log, and device sync status.
+type OverviewData struct {
+	Contacts       int
+	Lists          int
+	Devices        int
+	Activity       []ActivityItem
+	DeviceStatuses []DeviceStatus
+}
+
+// ActivityItem is one recent change: the contact it touched, a human verb, and
+// when it happened.
+type ActivityItem struct {
+	Name string
+	Kind string
+	At   time.Time
+}
+
+// DeviceStatus is a single device's sync health for the overview panel.
+type DeviceStatus struct {
+	Label    string
+	Tier     string
+	LastSeen *time.Time
+}
+
+templ Overview(d OverviewData) {
 	<div class="space-y-8">
-		<div>
-			<h1 class="text-2xl font-bold tracking-tight">Overview</h1>
-			<p class="mt-1 text-sm text-muted-foreground">Your address books, devices, and contacts.</p>
+		@PageHeader("Overview", "Your contacts, lists, and devices at a glance.", nil)
+		<div class="grid gap-4 sm:grid-cols-3">
+			@StatCard("Contacts", d.Contacts, "/dashboard/contacts", "contacts")
+			@StatCard("Lists", d.Lists, "/dashboard/books", "lists")
+			@StatCard("Devices", d.Devices, "/dashboard/devices", "devices")
 		</div>
-		<div class="grid gap-4 md:grid-cols-3">
-			@StatCard("Books", strconv.Itoa(books))
-			@StatCard("Devices", strconv.Itoa(devices))
-			@StatCard("Contacts", strconv.Itoa(contacts))
+		<div class="grid gap-6 lg:grid-cols-2">
+			@ActivityPanel(d.Activity)
+			@DevicesPanel(d.DeviceStatuses)
 		</div>
 	</div>
 }
 
-templ StatCard(label, value string) {
-	<div class="rounded-lg border border-border bg-background p-5">
-		<p class="text-sm text-muted-foreground">{ label }</p>
-		<p class="mt-2 text-2xl font-semibold tracking-tight">{ value }</p>
+templ StatCard(label string, value int, href, icon string) {
+	<a
+		href={ href }
+		hx-get={ href }
+		hx-push-url="true"
+		class="group rounded-lg border border-border bg-background p-5 transition-colors hover:bg-muted/40"
+	>
+		<div class="flex items-center justify-between">
+			<p class="text-sm text-muted-foreground">{ label }</p>
+			<span class="text-muted-foreground transition-colors group-hover:text-foreground">@Icon(icon)
+</span>
+		</div>
+		<p class="mt-2 text-3xl font-semibold tracking-tight">{ strconv.Itoa(value) }</p>
+	</a>
+}
+
+templ ActivityPanel(items []ActivityItem) {
+	<div class="rounded-lg border border-border bg-background">
+		<div class="border-b border-border px-4 py-3">
+			<h2 class="text-sm font-semibold">Recent activity</h2>
+		</div>
+		if len(items) == 0 {
+			@EmptyState("Nothing yet", "Changes from you and your synced devices will show up here.", nil)
+		} else {
+			<ul class="divide-y divide-border">
+				for _, it := range items {
+					<li class="flex items-center justify-between gap-3 px-4 py-2 text-sm">
+						<span class="truncate">{ it.Name }</span>
+						<span class="shrink-0 text-xs text-muted-foreground">{ it.Kind } · { relativeTime(&it.At) }</span>
+					</li>
+				}
+			</ul>
+		}
 	</div>
+}
+
+templ DevicesPanel(devices []DeviceStatus) {
+	<div class="rounded-lg border border-border bg-background">
+		<div class="flex items-center justify-between border-b border-border px-4 py-3">
+			<h2 class="text-sm font-semibold">Devices</h2>
+			<a href="/dashboard/devices" hx-get="/dashboard/devices" hx-push-url="true" class="text-xs text-muted-foreground transition-colors hover:text-foreground">Manage</a>
+		</div>
+		if len(devices) == 0 {
+			@EmptyState("No devices", "Add a device to get a token and start syncing.", nil)
+		} else {
+			<ul class="divide-y divide-border">
+				for _, dev := range devices {
+					<li class="flex items-center justify-between gap-3 px-4 py-2 text-sm">
+						<span class="flex min-w-0 items-center gap-2">
+							<span class="truncate">{ dev.Label }</span>
+							@Badge(dev.Tier, tierTone(dev.Tier))
+						</span>
+						<span class="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+							if isStale(dev.LastSeen) {
+								@Badge("stale", "danger")
+							}
+							{ relativeTime(dev.LastSeen) }
+						</span>
+					</li>
+				}
+			</ul>
+		}
+	</div>
+}
+
+func tierTone(tier string) string {
+	if tier == "primary" {
+		return "accent"
+	}
+	return "muted"
 }

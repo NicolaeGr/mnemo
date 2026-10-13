@@ -1,8 +1,8 @@
 package pages
 
 import (
+	"encoding/json"
 	"strconv"
-	"time"
 
 	"github.com/nicolaegr/mnemo/internal/store"
 	"github.com/nicolaegr/mnemo/internal/web/uictx"
@@ -14,58 +14,125 @@ type DeviceView struct {
 	Overrides map[int64]bool
 }
 
-templ DevicesPage(devices []DeviceView, errMsg string) {
+// DevicesData is the devices page and its rows fragment.
+type DevicesData struct {
+	Devices []DeviceView
+	Sort    string
+	Dir     string
+	ErrMsg  string
+}
+
+func devicesViewData(d DevicesData) string {
+	data, _ := json.Marshal(map[string]any{
+		"sort":     d.Sort,
+		"dir":      d.Dir,
+		"per":      max(len(d.Devices), 1),
+		"total":    len(d.Devices),
+		"endpoint": "/dashboard/devices/rows",
+		"target":   "#devices-rows",
+	})
+	return string(data)
+}
+
+templ DevicesPage(d DevicesData) {
 	<div class="space-y-6">
-		<div class="flex items-center justify-between gap-4">
-			<div>
-				<h1 class="text-xl font-semibold tracking-tight">Devices</h1>
-				<p class="text-xs text-muted-foreground">{ countLabel(len(devices), "device") }</p>
-			</div>
+		@PageHeader("Devices", countLabel(len(d.Devices), "device"), addDevice())
+		<div id="devices-notice"></div>
+		@DeviceList(d)
+	</div>
+}
+
+// DeviceList is the swap target for device mutations.
+templ DeviceList(d DevicesData) {
+	<div id="devices-list">
+		@DevicesTable(d)
+	</div>
+}
+
+templ DevicesTable(d DevicesData) {
+	<div x-data={ "listView(" + devicesViewData(d) + ")" } @listmeta.window="onMeta($event)">
+		<div class="overflow-hidden rounded-lg border border-border">
+			<table class="w-full text-sm">
+				<thead class="border-b border-border bg-muted/40">
+					<tr>
+						<th scope="col" class="w-px px-3 py-2"><span class="sr-only">Actions</span></th>
+						@SortableTh("label", "Label", "")
+						@SortableTh("tier", "Tier", "")
+						@SortableTh("last", "Last sync", "")
+						<th scope="col" class="hidden px-3 py-2 text-left text-xs font-medium text-muted-foreground sm:table-cell">Hidden lists</th>
+					</tr>
+				</thead>
+				<tbody id="devices-rows" class="divide-y divide-border">
+					@DeviceRows(d)
+				</tbody>
+			</table>
+		</div>
+	</div>
+}
+
+// DeviceRows renders both into the page and as the htmx response for #devices-rows.
+templ DeviceRows(d DevicesData) {
+	if d.ErrMsg != "" {
+		<tr>
+			<td colspan="5" class="px-3 py-4">
+				@ErrorBanner(d.ErrMsg)
+			</td>
+		</tr>
+	} else if len(d.Devices) == 0 {
+		<tr>
+			<td colspan="5">
+				@EmptyState("No devices yet", "Add a device to get a token, then point your phone or desktop client at your CardDAV URL.", addDevice())
+			</td>
+		</tr>
+	} else {
+		for _, dev := range d.Devices {
+			@DeviceRow(dev)
+		}
+	}
+}
+
+templ DeviceRow(d DeviceView) {
+	<tr class="hover:bg-muted/40">
+		<td class="w-px px-3 py-2">
 			<button
 				type="button"
-				class="inline-flex h-9 items-center rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90"
-				hx-get="/dashboard/devices/new"
+				class="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+				title="Edit device"
+				hx-get={ "/dashboard/devices/" + strconv.FormatInt(d.Principal.ID, 10) + "/edit" }
 				hx-target="#modal-root"
 				hx-swap="innerHTML"
-			>Add device</button>
-		</div>
-		<div id="devices-notice"></div>
-		@DeviceList(devices, errMsg)
-	</div>
-}
-
-templ DeviceList(devices []DeviceView, errMsg string) {
-	<div id="devices-list" class="space-y-3">
-		if errMsg != "" {
-			@ErrorBanner(errMsg)
-		}
-		if len(devices) == 0 {
-			<p class="text-sm text-muted-foreground">No devices yet.</p>
-		} else {
-			for _, d := range devices {
-				@DeviceCard(d)
+			>@Icon("edit")
+</button>
+		</td>
+		<td class="px-3 py-2 font-medium">{ d.Principal.Label }</td>
+		<td class="px-3 py-2">
+			if d.Principal.Tier == "primary" {
+				@Badge(d.Principal.Tier, "accent")
+			} else {
+				@Badge(d.Principal.Tier, "muted")
 			}
-		}
-	</div>
+		</td>
+		<td class="px-3 py-2 text-muted-foreground">
+			<span class="mr-2">{ relativeTime(d.Principal.LastSyncedAt) }</span>
+			if isStale(d.Principal.LastSyncedAt) {
+				@Badge("stale", "danger")
+			}
+		</td>
+		<td class="hidden px-3 py-2 text-muted-foreground sm:table-cell">{ hiddenCount(d) }</td>
+	</tr>
 }
 
-templ DeviceCard(d DeviceView) {
-	<div class="flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-4 py-3">
-		<div class="min-w-0">
-			<div class="flex flex-wrap items-center gap-2">
-				<span class="font-medium">{ d.Principal.Label }</span>
-				<span class="rounded-full bg-muted px-2 py-0.5 text-xs">{ d.Principal.Tier }</span>
-			</div>
-			<p class="mt-1 text-xs text-muted-foreground">last sync: { lastSeen(d.Principal) }</p>
-		</div>
-		<button
-			type="button"
-			class="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted"
-			hx-get={ "/dashboard/devices/" + strconv.FormatInt(d.Principal.ID, 10) + "/edit" }
-			hx-target="#modal-root"
-			hx-swap="innerHTML"
-		>Edit</button>
-	</div>
+templ addDevice() {
+	<button
+		type="button"
+		class="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90"
+		hx-get="/dashboard/devices/new"
+		hx-target="#modal-root"
+		hx-swap="innerHTML"
+	>
+		@Icon("plus")
+		<span>Add device</span>
+	</button>
 }
 
 // DeviceAddForm is the create form; the response shows the token once in the
@@ -87,7 +154,7 @@ templ DeviceForm(d DeviceView, books []store.Book) {
 		<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
 		@TextField("Label", "label", d.Principal.Label, "", true)
 		@SelectField("Tier", "tier", d.Principal.Tier, TierOptions())
-		@MultiSelect("hide", "Hidden books (this device only)", bookOptions(books), hiddenBookIDs(d.Overrides, books), "Books this device should not sync.")
+		@MultiSelect("hide", "Hidden lists (this device only)", bookOptions(books), hiddenBookIDs(d.Overrides, books), "Lists this device should not sync.")
 		<div class="flex items-center justify-between gap-2 pt-2">
 			<button
 				type="button"
@@ -118,6 +185,17 @@ func hidesBook(overrides map[int64]bool, bookID int64) bool {
 	return ok && !enabled
 }
 
+// hiddenCount is how many of the device's opt-out rows hide a list.
+func hiddenCount(d DeviceView) int {
+	n := 0
+	for _, enabled := range d.Overrides {
+		if !enabled {
+			n++
+		}
+	}
+	return n
+}
+
 func hiddenBookIDs(overrides map[int64]bool, books []store.Book) []int64 {
 	out := make([]int64, 0)
 	for _, b := range books {
@@ -126,11 +204,4 @@ func hiddenBookIDs(overrides map[int64]bool, books []store.Book) []int64 {
 		}
 	}
 	return out
-}
-
-func lastSeen(p store.Principal) string {
-	if p.LastSyncedAt == nil {
-		return "never"
-	}
-	return p.LastSyncedAt.Format(time.RFC3339)
 }

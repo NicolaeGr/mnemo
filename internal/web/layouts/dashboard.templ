@@ -2,123 +2,202 @@ package layouts
 
 import (
 	"github.com/nicolaegr/mnemo/internal/web/domain"
+	"github.com/nicolaegr/mnemo/internal/web/pages"
 	"github.com/nicolaegr/mnemo/internal/web/seg"
 	"github.com/nicolaegr/mnemo/internal/web/uictx"
 )
 
 templ DashboardSegment(child templ.Component) {
-	<div class="min-h-dvh bg-background text-foreground">
-		<div class="flex min-h-dvh">
-			<aside class="w-60 shrink-0 border-r border-border bg-background flex flex-col">
-				<div class="flex h-14 items-center gap-2 border-b border-border px-4">
-					<span
-						class="grid h-7 w-7 place-items-center rounded-lg bg-accent text-accent-foreground text-sm font-semibold"
-					>M</span>
-					<span class="font-semibold tracking-tight">mnemo</span>
-				</div>
-				<nav id="sidebar-nav" class="flex-1 space-y-1 p-3 text-sm">
-					@SidebarLinks()
-				</nav>
-				<div class="border-t border-border p-3">
-					<button
-						type="button"
-						popovertarget="user-menu"
-						class="popover-user-trigger flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-muted transition-colors"
-					>
-						<span class="grid h-8 w-8 place-items-center rounded-full bg-muted text-xs font-medium">
-							{ initials(seg.Data(ctx, "dashboard")) }
-						</span>
-						<span class="flex min-w-0 flex-1 flex-col items-start">
-							<span class="truncate font-medium">{ userName(seg.Data(ctx, "dashboard")) }</span>
-							<span class="truncate text-xs text-muted-foreground">{ userEmail(seg.Data(ctx, "dashboard")) }</span>
-						</span>
-						<span class="text-muted-foreground text-xs">
-							<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
-						</span>
-					</button>
-					<div id="user-menu" popover class="w-64 rounded-lg p-1 text-sm">
-						<div class="px-3 py-2">
-							<p class="font-medium">{ userName(seg.Data(ctx, "dashboard")) }</p>
-							<p class="truncate text-xs text-muted-foreground">{ userEmail(seg.Data(ctx, "dashboard")) }</p>
-						</div>
-						<div class="my-1 border-t border-border"></div>
-						<a
-							href="/dashboard/settings"
-							hx-get="/dashboard/settings/modal"
-							hx-target="#modal-root"
-							hx-swap="innerHTML"
-							class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-muted transition-colors"
-						>Settings</a>
-						<button
-							type="button"
-							onclick="toggleTheme()"
-							class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-muted transition-colors"
-						>
-							<span>Toggle theme</span>
-							<span class="ml-auto text-muted-foreground" data-theme-icon>
-								<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
-							</span>
-						</button>
-						<div class="my-1 border-t border-border"></div>
-						<form action="/logout" method="post" hx-post="/logout" hx-swap="none">
-							<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
-							<button
-								type="submit"
-								class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-							>Log out</button>
-						</form>
-					</div>
-				</div>
-			</aside>
-			<div class="flex min-w-0 flex-1 flex-col">
-				<header
-					class="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-border bg-background/80 px-6 backdrop-blur"
+	<div x-data="shell()" class="app-shell flex overflow-hidden bg-background text-foreground">
+		<div x-show="nav" x-cloak @click="nav = false" class="fixed inset-0 z-40 bg-black/40 md:hidden" aria-hidden="true"></div>
+		<aside
+			class="app-sidebar flex shrink-0 flex-col border-r border-border bg-background"
+			:class="{ 'is-open': nav, 'is-collapsed': collapsed }"
+		>
+			<div class="brand flex h-14 items-center gap-2 border-b border-border px-4">
+				<span
+					class="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground text-sm font-semibold"
+				>M</span>
+				<span class="brand-text truncate font-semibold tracking-tight">mnemo</span>
+			</div>
+			<nav id="sidebar-nav" class="flex-1 space-y-1 overflow-y-auto p-3 text-sm">
+				@SidebarLinks()
+			</nav>
+			<div class="border-t border-border p-3">
+				<button
+					type="button"
+					popovertarget="user-menu"
+					class="nav-item popover-user-trigger flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-muted transition-colors"
+					title="Account"
 				>
-					<div class="text-sm font-medium text-muted-foreground">Workspace</div>
+					<span class="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-muted text-xs font-medium">
+						{ initials(seg.Data(ctx, "dashboard")) }
+					</span>
+					<span class="user-meta flex min-w-0 flex-1 flex-col items-start">
+						<span class="truncate font-medium">{ userName(seg.Data(ctx, "dashboard")) }</span>
+						<span class="truncate text-xs text-muted-foreground">{ userEmail(seg.Data(ctx, "dashboard")) }</span>
+					</span>
+					<span class="user-meta text-muted-foreground text-xs">
+						<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+					</span>
+				</button>
+				<div id="user-menu" popover class="w-64 rounded-lg p-1 text-sm">
+					<div class="px-3 py-2">
+						<p class="font-medium">{ userName(seg.Data(ctx, "dashboard")) }</p>
+						<p class="truncate text-xs text-muted-foreground">{ userEmail(seg.Data(ctx, "dashboard")) }</p>
+					</div>
+					<div class="my-1 border-t border-border"></div>
+					<a
+						href="/dashboard/settings"
+						hx-get="/dashboard/settings/modal"
+						hx-target="#modal-root"
+						hx-swap="innerHTML"
+						class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-muted transition-colors"
+					>Settings</a>
 					<button
 						type="button"
 						onclick="toggleTheme()"
-						class="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground hover:bg-muted transition-colors"
+						class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-muted transition-colors"
+					>
+						<span>Toggle theme</span>
+						<span class="ml-auto text-muted-foreground" data-theme-icon>
+							<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
+						</span>
+					</button>
+					<div class="my-1 border-t border-border"></div>
+					<form action="/logout" method="post" hx-post="/logout" hx-swap="none">
+						<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+						<button
+							type="submit"
+							class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+						>Log out</button>
+					</form>
+				</div>
+			</div>
+		</aside>
+		<div class="flex min-w-0 flex-1 flex-col">
+			<header class="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-4 md:px-6">
+				<button
+					type="button"
+					@click="nav = true"
+					class="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted md:hidden"
+					title="Open navigation"
+				>
+					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"></path></svg>
+				</button>
+				<button
+					type="button"
+					@click="toggleCollapse()"
+					class="hidden h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted md:grid"
+					:title="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+				>
+					<svg
+						class="h-4 w-4 transition-transform"
+						:class="collapsed && 'rotate-180'"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					><path d="m15 18-6-6 6-6"></path></svg>
+				</button>
+				@HeaderTitle(seg.PageTitle(ctx))
+				<div class="ml-auto flex items-center gap-2">
+					<div class="relative" x-data="{ open: false }" @click.outside="open = false">
+						<button
+							type="button"
+							@click="open = !open"
+							class="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted"
+							title="Notifications"
+						>@pages.Icon("bell")
+</button>
+						<div
+							x-show="open"
+							x-cloak
+							class="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
+						>
+							<div class="px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Notifications</div>
+							<div class="border-t border-border px-3 py-3 text-sm text-muted-foreground">No notifications yet. Sharing invitations will appear here.</div>
+						</div>
+					</div>
+					<button
+						type="button"
+						onclick="toggleTheme()"
+						class="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted"
 						title="Toggle theme"
 					>
-						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
+						@pages.Icon("sun")
 					</button>
-				</header>
-				<main id="outlet-dashboard" class="flex-1 p-6 md:p-8">
-					@child
-				</main>
-			</div>
+				</div>
+			</header>
+			<main id="outlet-dashboard" class="flex-1 overflow-y-auto p-4 md:p-8">
+				@child
+			</main>
 		</div>
 	</div>
 }
 
-templ NavLink(href, label string) {
+// HeaderTitle is the header's page label. It is swapped out-of-band on fragment
+// navigations (see HeaderTitleOOB), since the dashboard segment is not
+// re-rendered then.
+templ HeaderTitle(title string) {
+	<span id="header-title" class="min-w-0 truncate text-sm font-medium">{ title }</span>
+}
+
+templ HeaderTitleOOB(title string) {
+	<span id="header-title" hx-swap-oob="true" class="min-w-0 truncate text-sm font-medium">{ title }</span>
+}
+
+templ NavLink(href, label, icon string) {
 	<a
 		href={ href }
 		hx-get={ href }
 		hx-push-url="true"
-		class={ "flex items-center gap-2 rounded-md px-3 py-2 transition-colors", navClass(seg.Path(ctx), href) }
-	>{ label }</a>
+		@click="nav = false"
+		title={ label }
+		class={ "nav-item flex items-center gap-2 rounded-md px-3 py-2 transition-colors", navClass(seg.Path(ctx), href) }
+	>
+		@pages.Icon(icon)
+		<span class="nav-label">{ label }</span>
+	</a>
+}
+
+// NavLinkDisabled is a roadmap entry: visible but inert until its phase lands.
+templ NavLinkDisabled(label, icon string) {
+	<span class="nav-item flex cursor-not-allowed items-center gap-2 rounded-md px-3 py-2 text-muted-foreground/60" title="Coming soon">
+		@pages.Icon(icon)
+		<span class="nav-label">{ label }</span>
+		<span class="nav-label ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide">Soon</span>
+	</span>
 }
 
 templ SidebarLinks() {
-	@NavLink("/dashboard", "Overview")
-	@NavLink("/dashboard/books", "Books")
-	@NavLink("/dashboard/devices", "Devices")
-	@NavLink("/dashboard/contacts", "Contacts")
+	<div class="space-y-1">
+		@NavLink("/dashboard", "Overview", "overview")
+		@NavLink("/dashboard/contacts", "Contacts", "contacts")
+		@NavLink("/dashboard/books", "Lists", "lists")
+		@NavLink("/dashboard/devices", "Devices", "devices")
+	</div>
+	<div class="mt-6 space-y-1">
+		<p class="nav-section px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Sharing</p>
+		@NavLinkDisabled("Groups", "groups")
+		@NavLinkDisabled("Shared with me", "shared")
+	</div>
 }
 
 // SidebarNavOOB refreshes the nav on fragment navigations, since the dashboard
 // segment that owns it is not re-rendered then and its active state would stick.
 templ SidebarNavOOB() {
-	<nav id="sidebar-nav" hx-swap-oob="outerHTML" class="flex-1 space-y-1 p-3 text-sm">
+	<nav id="sidebar-nav" hx-swap-oob="outerHTML" class="flex-1 space-y-1 overflow-y-auto p-3 text-sm">
 		@SidebarLinks()
 	</nav>
 }
 
 func navClass(current, href string) string {
 	if current == href {
-		return "bg-muted text-foreground"
+		return "bg-muted font-medium text-foreground"
 	}
 	return "text-muted-foreground hover:bg-muted hover:text-foreground"
 }

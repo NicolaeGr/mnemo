@@ -7,6 +7,7 @@ import (
 )
 
 templ RootSegment(child templ.Component) {
+	<!DOCTYPE html>
 	<html lang="en">
 		<head>
 			<meta charset="utf-8"/>
@@ -16,9 +17,11 @@ templ RootSegment(child templ.Component) {
 			<link rel="stylesheet" href="/static/output.css"/>
 			<script src="/static/theme.js"></script>
 			<script defer src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+			<!-- app.js must define its Alpine factories (shell, listView, ...) before
+			     Alpine starts, so it loads ahead of the Alpine bundle. -->
+			<script defer src="/static/app.js"></script>
 			<script defer src="https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js"></script>
 			<script type="module" src="https://unpkg.com/@oddbird/css-anchor-positioning"></script>
-			<script src="/static/app.js" defer></script>
 		</head>
 		<body data-stack={ stackAttr(seg.StackIDs(ctx)) }>
 			<div id="outlet-root">

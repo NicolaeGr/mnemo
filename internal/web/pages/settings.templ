@@ -43,7 +43,7 @@ templ SettingsBookForm(books []store.Book, defaultID *int64, errMsg, target stri
 			@ErrorBanner(errMsg)
 		}
 		<div class="max-w-xs">
-			@SelectField("Default book", "default_book_id", defaultBookValue(defaultID), activeBookOptions(books))
+			@SelectField("Default list", "default_book_id", defaultBookValue(defaultID), activeBookOptions(books))
 		</div>
 		<div class="flex justify-end">
 			@PrimaryButton("Save")

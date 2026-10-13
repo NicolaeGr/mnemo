@@ -14,67 +14,157 @@ var defaultTiers = []string{"primary", "secondary"}
 
 var allTiers = []string{"primary", "secondary", "archived"}
 
-templ BooksPage(books []store.Book, errMsg string) {
+// ListsData carries the lists page and its sortable grid fragment.
+type ListsData struct {
+	Summaries []store.BookSummary
+	Sort      string
+	ErrMsg    string
+}
+
+func listsSortData(sort string) string {
+	if sort == "" {
+		sort = "name"
+	}
+	data, _ := json.Marshal(map[string]any{
+		"sort":     sort,
+		"endpoint": "/dashboard/books/grid",
+		"target":   "#books-list",
+	})
+	return string(data)
+}
+
+templ ListsPage(d ListsData) {
 	<div class="space-y-6">
-		<div class="flex items-center justify-between gap-4">
-			<div>
-				<h1 class="text-xl font-semibold tracking-tight">Books</h1>
-				<p class="text-xs text-muted-foreground">{ countLabel(len(books), "book") }</p>
-			</div>
-			<button
-				type="button"
-				class="inline-flex h-9 items-center rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90"
-				hx-get="/dashboard/books/new"
-				hx-target="#modal-root"
-				hx-swap="innerHTML"
-			>Add book</button>
+		@PageHeader("Lists", countLabel(len(d.Summaries), "list"), newList())
+		<div x-data={ "listSort(" + listsSortData(d.Sort) + ")" } class="flex flex-wrap items-center gap-2 text-sm">
+			<span class="text-muted-foreground">Sort by</span>
+			<button type="button" @click="setSort('name')" :class="sort === 'name' ? activeClass : idleClass">Name</button>
+			<button type="button" @click="setSort('contacts')" :class="sort === 'contacts' ? activeClass : idleClass">Contact count</button>
 		</div>
-		@BookList(books, errMsg)
+		@ListGrid(d)
 	</div>
 }
 
-templ BookList(books []store.Book, errMsg string) {
-	<div id="books-list" class="space-y-3">
-		if errMsg != "" {
-			@ErrorBanner(errMsg)
+// ListGrid is the card grid, rendered both into the page and as the materialised
+// response for a sort change (its own id is the htmx target).
+templ ListGrid(d ListsData) {
+	<div id="books-list" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+		if d.ErrMsg != "" {
+			<div class="md:col-span-2 xl:col-span-3">
+				@ErrorBanner(d.ErrMsg)
+			</div>
 		}
-		if len(books) == 0 {
-			<p class="text-sm text-muted-foreground">No books yet.</p>
+		if len(d.Summaries) == 0 {
+			<div class="md:col-span-2 xl:col-span-3">
+				@EmptyState("No lists yet", "Create a list to group contacts and sync them to chosen devices.", newList())
+			</div>
 		} else {
-			for _, b := range books {
-				@BookCard(b)
+			for _, s := range d.Summaries {
+				@ListCard(s)
 			}
 		}
 	</div>
 }
 
-templ BookCard(b store.Book) {
-	<div class="flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-4 py-3">
-		<div class="min-w-0">
-			<div class="flex flex-wrap items-center gap-2">
-				<span class="font-medium">{ b.DisplayName }</span>
-				<span class="text-xs text-muted-foreground">{ b.Slug }</span>
-				if b.IsSystem {
-					<span class="rounded-full bg-muted px-2 py-0.5 text-xs">system</span>
-				}
-				if !b.IsActive {
-					<span class="rounded-full bg-red-600/10 px-2 py-0.5 text-xs text-red-600">inactive</span>
-				}
+templ ListCard(s store.BookSummary) {
+	<div class="flex flex-col rounded-lg border border-border bg-background">
+		<div class="flex items-start justify-between gap-3 p-4">
+			<div class="min-w-0">
+				<div class="flex flex-wrap items-center gap-2">
+					<span class="truncate font-medium">{ s.Book.DisplayName }</span>
+					if s.Book.IsSystem {
+						@Badge("system", "muted")
+					}
+					if !s.Book.IsActive {
+						@Badge("inactive", "danger")
+					}
+				</div>
+				<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+					<span class="font-mono">{ s.Book.Slug }</span>
+					<span>·</span>
+					<span>{ countLabel(s.ContactCount, "contact") }</span>
+				</div>
+				<div class="mt-2 flex flex-wrap gap-1">
+					for _, t := range s.Book.SyncedTiers {
+						@Chip(t)
+					}
+				</div>
 			</div>
-			<div class="mt-1 flex flex-wrap gap-1">
-				for _, t := range b.SyncedTiers {
-					<span class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{ t }</span>
-				}
-			</div>
+			<button
+				type="button"
+				class="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+				title="Edit list"
+				hx-get={ "/dashboard/books/" + strconv.FormatInt(s.Book.ID, 10) + "/edit" }
+				hx-target="#modal-root"
+				hx-swap="innerHTML"
+			>@Icon("edit")
+</button>
 		</div>
-		<button
-			type="button"
-			class="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted"
-			hx-get={ "/dashboard/books/" + strconv.FormatInt(b.ID, 10) + "/edit" }
-			hx-target="#modal-root"
-			hx-swap="innerHTML"
-		>Edit</button>
+		<div class="border-t border-border">
+			if len(s.Preview) == 0 {
+				<p class="px-4 py-6 text-center text-xs text-muted-foreground">No contacts in this list.</p>
+			} else {
+				<div class="divide-y divide-border">
+					for _, p := range s.Preview {
+						@PreviewRow(p)
+					}
+				</div>
+			}
+		</div>
+		if s.ContactCount > 0 {
+			<div class="mt-auto border-t border-border">
+				<a
+					href={ listContactsURL(s.Book.ID) }
+					hx-get={ listContactsURL(s.Book.ID) }
+					hx-push-url="true"
+					class="flex items-center justify-between gap-3 px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+				>
+					<span>{ listFooterLabel(s) }</span>
+					@Icon("arrow-right")
+				</a>
+			</div>
+		}
 	</div>
+}
+
+templ PreviewRow(p store.ContactPreview) {
+	<div class="flex items-center justify-between gap-3 px-4 py-2 text-sm">
+		<span class="truncate">{ p.Name }</span>
+		<span class="shrink-0 text-xs text-muted-foreground">{ previewSecondary(p) }</span>
+	</div>
+}
+
+func previewSecondary(p store.ContactPreview) string {
+	if p.Tel != "" {
+		return p.Tel
+	}
+	return p.Email
+}
+
+func listContactsURL(bookID int64) string {
+	return "/dashboard/contacts?book=" + strconv.FormatInt(bookID, 10)
+}
+
+// listFooterLabel names the card's footer action: how many more contacts the
+// list holds beyond the preview, or a plain "view all" when it holds none back.
+func listFooterLabel(s store.BookSummary) string {
+	if remaining := s.ContactCount - len(s.Preview); remaining > 0 {
+		return "View " + strconv.Itoa(remaining) + " more"
+	}
+	return "View all contacts"
+}
+
+templ newList() {
+	<button
+		type="button"
+		class="inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90"
+		hx-get="/dashboard/books/new"
+		hx-target="#modal-root"
+		hx-swap="innerHTML"
+	>
+		@Icon("plus")
+		<span>New list</span>
+	</button>
 }
 
 // BookForm renders the add (b == nil) or edit form inside a modal. Submitting

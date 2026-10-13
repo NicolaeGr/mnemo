@@ -382,6 +382,87 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
+// ContactPreview is the handful of fields a list card shows for one tagged
+// contact, read straight from search_meta to avoid decoding every vCard.
+type ContactPreview struct {
+	Name  string
+	Tel   string
+	Email string
+}
+
+// BookSummary is one book with the numbers the management view needs: how many
+// live contacts it holds and a short preview of them.
+type BookSummary struct {
+	Book         Book
+	ContactCount int
+	Preview      []ContactPreview
+}
+
+// ListBookSummaries lists the actor's books, each with its live-contact count
+// and up to previewLimit preview contacts (LIFO of the name ordering). Books
+// with no contacts still appear, with a zero count and an empty preview.
+func (s ScopedStore) ListBookSummaries(ctx context.Context, previewLimit int) ([]BookSummary, error) {
+	books, err := s.ListBooks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if previewLimit <= 0 {
+		previewLimit = 6
+	}
+	summaries := make([]BookSummary, len(books))
+	index := make(map[int64]int, len(books))
+	for i, b := range books {
+		summaries[i] = BookSummary{Book: b, Preview: []ContactPreview{}}
+		index[b.ID] = i
+	}
+
+	rows, err := s.Tx.Query(ctx, `
+		SELECT t.book_id, t.total, t.fn, t.tel, t.email
+		  FROM (
+			SELECT cb.book_id,
+			       count(*) OVER (PARTITION BY cb.book_id) AS total,
+			       row_number() OVER (PARTITION BY cb.book_id
+			                          ORDER BY lower(coalesce(c.search_meta->>'fn', '')), c.filename) AS rn,
+			       coalesce(c.search_meta->>'fn', c.uid) AS fn,
+			       c.search_meta->'tels'->0->>'raw' AS tel,
+			       c.search_meta->'emails'->>0 AS email
+			  FROM contact_books cb
+			  JOIN contacts c ON c.id = cb.contact_id
+			 WHERE c.user_id = $1 AND c.deleted_at IS NULL
+		) t
+		 WHERE t.rn <= $2
+		 ORDER BY t.book_id, t.rn`, s.Actor.UserID, previewLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var bookID int64
+		var total int
+		var fn, tel, email *string
+		if err := rows.Scan(&bookID, &total, &fn, &tel, &email); err != nil {
+			return nil, err
+		}
+		i, ok := index[bookID]
+		if !ok {
+			continue
+		}
+		summaries[i].ContactCount = total
+		summaries[i].Preview = append(summaries[i].Preview, ContactPreview{
+			Name: deref(fn), Tel: deref(tel), Email: deref(email),
+		})
+	}
+	return summaries, rows.Err()
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 func scanBook(row pgx.Row) (Book, error) {
 	var b Book
 	err := row.Scan(&b.ID, &b.OwnerUserID, &b.Slug, &b.DisplayName, &b.Description,

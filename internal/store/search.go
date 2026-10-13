@@ -6,23 +6,28 @@ import (
 	"strings"
 )
 
-// ContactSearch is a page of search results.
+// ContactSearch is a page of search results. Total is the number of matching
+// contacts across every page, so the UI can show a count and a pager.
 type ContactSearch struct {
 	Contacts []Contact
 	NextPage bool
+	Total    int
 }
 
-// SearchParams bounds a contact search. Query matches name or phone digits;
-// BookID, when non-nil, restricts to a single tag. Page is 1-based.
+// SearchParams bounds a contact search. Query matches name, org, or phone
+// digits; BookID, when non-nil, restricts to a single tag. Page is 1-based.
+// Sort is one of name, org, updated, created (default name); Dir is asc or desc.
 type SearchParams struct {
 	Query  string
 	BookID *int64
 	Page   int
 	Per    int
+	Sort   string
+	Dir    string
 }
 
-// Search returns live contacts matching q by name or by phone digits, scoped by
-// the actor's user and, optionally, one book.
+// Search returns live contacts matching q, scoped by the actor's user and,
+// optionally, one book, in the requested order.
 func (s ScopedStore) Search(ctx context.Context, p SearchParams) (ContactSearch, error) {
 	per := p.Per
 	if per <= 0 || per > 100 {
@@ -62,14 +67,17 @@ func (s ScopedStore) Search(ctx context.Context, p SearchParams) (ContactSearch,
 		conds = append(conds, "("+strings.Join(or, " OR ")+")")
 	}
 
+	order := sortExpr(p.Sort) + " " + sortDir(p.Dir)
+
 	query := fmt.Sprintf(`
 		SELECT id, filename, vcard_text, uid, search_meta, etag,
-		       modified_by, deleted_at, created_at, updated_at
+		       modified_by, deleted_at, created_at, updated_at,
+		       count(*) OVER() AS total
 		  FROM contacts c
 		 WHERE %s
-		 ORDER BY c.filename
+		 ORDER BY %s, c.filename
 		 LIMIT $%d OFFSET $%d`,
-		strings.Join(conds, " AND "), arg(per+1), arg((page-1)*per))
+		strings.Join(conds, " AND "), order, arg(per+1), arg((page-1)*per))
 
 	rows, err := s.Tx.Query(ctx, query, args...)
 	if err != nil {
@@ -78,9 +86,11 @@ func (s ScopedStore) Search(ctx context.Context, p SearchParams) (ContactSearch,
 	defer rows.Close()
 
 	out := make([]Contact, 0, per)
+	total := 0
 	for rows.Next() {
-		c, err := scanContact(rows)
-		if err != nil {
+		var c Contact
+		if err := rows.Scan(&c.ID, &c.Filename, &c.VCardText, &c.UID, &c.SearchMeta,
+			&c.ETag, &c.ModifiedBy, &c.DeletedAt, &c.CreatedAt, &c.UpdatedAt, &total); err != nil {
 			return ContactSearch{}, err
 		}
 		out = append(out, c)
@@ -94,7 +104,29 @@ func (s ScopedStore) Search(ctx context.Context, p SearchParams) (ContactSearch,
 		out = out[:per]
 		next = true
 	}
-	return ContactSearch{Contacts: out, NextPage: next}, nil
+	return ContactSearch{Contacts: out, NextPage: next, Total: total}, nil
+}
+
+// sortExpr maps a UI sort key onto a safe SQL expression. Unknown keys fall back
+// to the display name, so a bad query string can never reach SQL as a column.
+func sortExpr(key string) string {
+	switch key {
+	case "org":
+		return "lower(coalesce(c.search_meta->>'org', ''))"
+	case "updated":
+		return "c.updated_at"
+	case "created":
+		return "c.created_at"
+	default:
+		return "lower(coalesce(c.search_meta->>'fn', ''))"
+	}
+}
+
+func sortDir(dir string) string {
+	if strings.EqualFold(dir, "desc") {
+		return "DESC"
+	}
+	return "ASC"
 }
 
 func phoneDigits(q string) string {

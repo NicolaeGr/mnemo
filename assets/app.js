@@ -35,6 +35,144 @@ document.body.addEventListener("segments", (e) => {
   document.body.dataset.mounted = mounted.join(",");
 });
 
+// A request in flight shows a progress cursor everywhere, so htmx interactions
+// (search, sort, paging, mutations) never look inert.
+document.body.addEventListener("htmx:beforeRequest", () =>
+  document.body.classList.add("htmx-busy"),
+);
+for (const ev of [
+  "htmx:afterRequest",
+  "htmx:responseError",
+  "htmx:sendError",
+  "htmx:timeout",
+]) {
+  document.body.addEventListener(ev, () =>
+    document.body.classList.remove("htmx-busy"),
+  );
+}
+
+// shell drives the app frame: the mobile drawer (nav) and the slim/wide sidebar
+// (collapsed, persisted in localStorage). The sidebar reacts to these via its
+// `:class` binding; no DOM side effects are needed.
+window.shell = () => ({
+  nav: false,
+  collapsed: false,
+  init() {
+    try {
+      this.collapsed = localStorage.getItem("sidebarCollapsed") === "1";
+    } catch (e) {
+      /* storage unavailable; the choice just won't persist */
+    }
+  },
+  toggleCollapse() {
+    this.collapsed = !this.collapsed;
+    try {
+      localStorage.setItem("sidebarCollapsed", this.collapsed ? "1" : "0");
+    } catch (e) {
+      /* storage unavailable */
+    }
+  },
+});
+
+// listView backs the sortable, searchable tables (contacts, devices). It owns
+// the sort/dir/page state, debounces changes, and asks htmx to refetch just the
+// rows. The count and pager render from this state, refreshed by the rows
+// endpoint's HX-Trigger payload.
+window.listView = (init) => ({
+  q: init.q || "",
+  sort: init.sort || "name",
+  dir: init.dir || "asc",
+  page: init.page || 1,
+  per: init.per || 50,
+  total: init.total || 0,
+  book: init.book || "",
+  endpoint: init.endpoint,
+  target: init.target,
+  loading: false,
+  timer: null,
+  init() {
+    this.$watch("q", () => {
+      this.page = 1;
+      this.queue();
+    });
+  },
+  get pages() {
+    return Math.max(1, Math.ceil(this.total / this.per));
+  },
+  get hasPrev() {
+    return this.page > 1;
+  },
+  get hasNext() {
+    return this.page < this.pages;
+  },
+  get countLabel() {
+    return this.total === 1 ? "1 result" : this.total + " results";
+  },
+  sortBy(field) {
+    if (this.sort === field) {
+      this.dir = this.dir === "asc" ? "desc" : "asc";
+    } else {
+      this.sort = field;
+      this.dir = "asc";
+    }
+    this.page = 1;
+    this.queue();
+  },
+  go(page) {
+    const p = Math.min(Math.max(1, page), this.pages);
+    if (p === this.page) return;
+    this.page = p;
+    this.queue();
+  },
+  queue() {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.reload(), 180);
+  },
+  reload() {
+    const params = new URLSearchParams({
+      q: this.q,
+      sort: this.sort,
+      dir: this.dir,
+      page: String(this.page),
+    });
+    if (this.book) params.set("book", String(this.book));
+    this.loading = true;
+    htmx.ajax("GET", this.endpoint + "?" + params.toString(), {
+      target: this.target,
+      swap: "innerHTML",
+    });
+  },
+  onMeta(e) {
+    const d = (e && e.detail) || {};
+    if (typeof d.total === "number") this.total = d.total;
+    if (typeof d.page === "number") this.page = d.page;
+    this.loading = false;
+  },
+  ariaSort(field) {
+    if (this.sort !== field) return "none";
+    return this.dir === "asc" ? "ascending" : "descending";
+  },
+});
+
+// listSort backs the lists grid: two buttons that reorder the cards server-side.
+window.listSort = (init) => ({
+  sort: init.sort || "name",
+  endpoint: init.endpoint,
+  target: init.target,
+  activeClass:
+    "inline-flex h-8 items-center rounded-md bg-accent px-3 text-xs font-medium text-accent-foreground",
+  idleClass:
+    "inline-flex h-8 items-center rounded-md border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-muted",
+  setSort(next) {
+    if (this.sort === next) return;
+    this.sort = next;
+    htmx.ajax("GET", this.endpoint + "?sort=" + encodeURIComponent(next), {
+      target: this.target,
+      swap: "outerHTML",
+    });
+  },
+});
+
 // Any handler can trigger `showToast` to surface feedback.
 let toastTimer = null;
 document.body.addEventListener("showToast", (e) => {
