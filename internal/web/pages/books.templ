@@ -127,7 +127,7 @@ templ BookForm(b *store.Book) {
 			<div>
 				if b != nil && !b.IsSystem {
 					<button
-						type="submit"
+						type="button"
 						class="inline-flex h-9 items-center rounded-md border border-red-600/40 px-3 text-sm text-red-600 transition-colors hover:bg-red-600/10"
 						hx-post={ "/dashboard/books/" + strconv.FormatInt(b.ID, 10) + "/delete" }
 						hx-target="#books-list"
