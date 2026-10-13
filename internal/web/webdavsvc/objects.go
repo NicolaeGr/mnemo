@@ -210,6 +210,7 @@ func (b *backend) PutAddressObject(ctx context.Context, p string, card vcard.Car
 			UID:        uid,
 			VCardText:  text,
 			SearchMeta: meta,
+			DAV:        true,
 		}, cond)
 		return err
 	})

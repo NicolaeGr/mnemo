@@ -31,6 +31,11 @@ so use the flag only on a trusted network.
   - REPORT `sync-collection` (RFC 6578) for incremental sync.
   - address-book PROPFIND with `getctag` / `supported-report-set`.
   - `.well-known/carddav` -> 301 `/carddav/`.
+
+  Each card's `CATEGORIES` mirrors the books it is tagged into, so a client that
+  groups by category shows the book names, as DAVx⁵ does on Android. The server owns
+  the property and overwrites any value a client sends.
+
 - **REST** at `/api/v1` for managing the parts CardDAV can't:
   - `POST /principals` mints a device token (returned once).
   - `GET|POST /books`, `PATCH|DELETE /books/{id}`.

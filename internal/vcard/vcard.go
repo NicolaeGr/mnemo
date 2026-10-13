@@ -61,13 +61,7 @@ func FromRaw(raw, filename string) (text, uid string, meta []byte, err error) {
 // normalizeBody strips CRs, unfolds and re-folds every logical line, and splices
 // insert before the END:VCARD terminator (or appends when there is none).
 func normalizeBody(raw string, insert []string) string {
-	raw = strings.ReplaceAll(strings.ReplaceAll(raw, "\r\n", "\n"), "\r", "\n")
-	lines := strings.Split(raw, "\n")
-	if n := len(lines); n > 0 && lines[n-1] == "" {
-		lines = lines[:n-1] // drop the empty tail from a final newline
-	}
-	logical := unfoldLines(lines)
-
+	logical := logicalLines(raw)
 	out := make([]string, 0, len(logical)+len(insert))
 	inserted := false
 	for _, l := range logical {
@@ -80,15 +74,120 @@ func normalizeBody(raw string, insert []string) string {
 	if !inserted {
 		out = append(out, insert...)
 	}
+	return foldLines(out)
+}
 
+// WithCategories returns a canonical body whose CATEGORIES properties list names,
+// or carry none when names is empty. Each name gets its own property, because the
+// go-webdav response path re-encodes through go-vcard, which would escape a comma
+// list into one literal value. Every other property, its order, and its parameters
+// survive; only line endings, folding, and CATEGORIES change.
+func WithCategories(text string, names []string) string {
+	logical := logicalLines(text)
+	out := make([]string, 0, len(logical)+len(names))
+	inserted := false
+	for _, l := range logical {
+		if propertyName(l) == "CATEGORIES" {
+			continue
+		}
+		if !inserted && strings.EqualFold(strings.TrimSpace(l), "END:VCARD") {
+			out = append(out, categoryLines(names)...)
+			inserted = true
+		}
+		out = append(out, l)
+	}
+	if !inserted {
+		out = append(out, categoryLines(names)...)
+	}
+	return foldLines(out)
+}
+
+// logicalLines normalizes line endings, drops a trailing blank line, and unfolds
+// continuation lines into their logical properties.
+func logicalLines(raw string) []string {
+	raw = strings.ReplaceAll(strings.ReplaceAll(raw, "\r\n", "\n"), "\r", "\n")
+	lines := strings.Split(raw, "\n")
+	if n := len(lines); n > 0 && lines[n-1] == "" {
+		lines = lines[:n-1]
+	}
+	return unfoldLines(lines)
+}
+
+func foldLines(lines []string) string {
 	var b strings.Builder
-	for _, l := range out {
+	for _, l := range lines {
 		for _, phys := range foldLine(l) {
 			b.WriteString(phys)
 			b.WriteByte('\n')
 		}
 	}
 	return b.String()
+}
+
+// propertyName returns the uppercased property name of a logical line, before any
+// group, parameter, or value.
+func propertyName(line string) string {
+	name := line
+	if i := strings.IndexByte(name, ':'); i >= 0 {
+		name = name[:i]
+	}
+	if i := strings.IndexByte(name, ';'); i >= 0 {
+		name = name[:i]
+	}
+	return strings.ToUpper(strings.TrimSpace(name))
+}
+
+func categoryLines(names []string) []string {
+	lines := make([]string, 0, len(names))
+	for _, n := range names {
+		lines = append(lines, "CATEGORIES:"+escapeValue(n))
+	}
+	return lines
+}
+
+// Categories reads the CATEGORIES properties of a canonical body. It returns the
+// raw logical lines and the parsed values, so a caller can log what a client sent
+// and in what shape. A value is parsed by splitting its line on unescaped commas
+// and unescaping each part.
+func Categories(text string) (raw, values []string) {
+	for _, l := range logicalLines(text) {
+		if propertyName(l) != "CATEGORIES" {
+			continue
+		}
+		raw = append(raw, l)
+		values = append(values, splitCategoryValue(lineValue(l))...)
+	}
+	return raw, values
+}
+
+// lineValue returns the part of a logical line after its first colon.
+func lineValue(line string) string {
+	if i := strings.IndexByte(line, ':'); i >= 0 {
+		return line[i+1:]
+	}
+	return ""
+}
+
+// splitCategoryValue splits a CATEGORIES value on unescaped commas and unescapes
+// each item.
+func splitCategoryValue(v string) []string {
+	out := make([]string, 0, 1)
+	var b strings.Builder
+	for i := 0; i < len(v); i++ {
+		switch v[i] {
+		case '\\':
+			if i+1 < len(v) {
+				i++
+				b.WriteByte(v[i])
+			}
+		case ',':
+			out = append(out, b.String())
+			b.Reset()
+		default:
+			b.WriteByte(v[i])
+		}
+	}
+	return append(out, b.String())
 }
 
 // unfoldLines joins continuation lines (those beginning with a space or tab) into

@@ -41,6 +41,9 @@ type PutContactParams struct {
 	UID        string
 	VCardText  string // raw body; CRs are normalized here
 	SearchMeta []byte
+	// DAV marks a write from the CardDAV plane, so its CATEGORIES is logged before
+	// it is overwritten.
+	DAV bool
 }
 
 // PutResult reports the outcome of a PUT.
@@ -170,10 +173,24 @@ func (s ScopedStore) LiveContactByID(ctx context.Context, id int64) (Contact, er
 }
 
 // PutContact handles preconditions, live-UID dedupe, default system-book
-// tagging on create, and a contact_changes 'put' row. Failure paths return
-// ErrPrecondition (412), ErrNotFound (404), ErrUIDConflict or ErrFilenameRetired
-// (409). Caller must hold the sync lock.
+// tagging on create, and a contact_changes 'put' row, then makes the card's
+// CATEGORIES follow its books and returns the resulting etag. Failure paths
+// return ErrPrecondition (412), ErrNotFound (404), ErrUIDConflict or
+// ErrFilenameRetired (409). Caller must hold the sync lock.
 func (s ScopedStore) PutContact(ctx context.Context, p PutContactParams, cond Precondition) (PutResult, error) {
+	res, err := s.putContact(ctx, p, cond)
+	if err != nil {
+		return PutResult{}, err
+	}
+	etag, err := s.applyCategories(ctx, p.Filename, p.DAV)
+	if err != nil {
+		return PutResult{}, err
+	}
+	res.ETag = etag
+	return res, nil
+}
+
+func (s ScopedStore) putContact(ctx context.Context, p PutContactParams, cond Precondition) (PutResult, error) {
 	text := normalizeLineEndings(p.VCardText)
 	etag := sha256Hex(text)
 
@@ -323,21 +340,22 @@ func (s ScopedStore) tagSystemBook(ctx context.Context, contactID int64) error {
 // It is the single write sequence the REST and admin planes share, so the two
 // cannot drift. tags == nil leaves tagging alone (a create keeps its system-book
 // default, an update keeps existing tags); tags != nil sets the exact book set,
-// repaired to the system book when empty (I1). Caller holds LockSync.
+// repaired to the system book when empty (I1). Either way the card's CATEGORIES
+// ends up matching its books. Caller holds LockSync.
 func (s ScopedStore) SaveContact(ctx context.Context, p PutContactParams, cond Precondition, tags []int64) (Contact, error) {
 	if _, err := s.PutContact(ctx, p, cond); err != nil {
 		return Contact{}, err
 	}
-	c, err := s.LiveContactByFilename(ctx, p.Filename)
-	if err != nil {
-		return Contact{}, err
-	}
 	if tags != nil {
+		c, err := s.LiveContactByFilename(ctx, p.Filename)
+		if err != nil {
+			return Contact{}, err
+		}
 		if err := s.SetContactBooks(ctx, c.ID, tags); err != nil {
 			return Contact{}, err
 		}
 	}
-	return c, nil
+	return s.LiveContactByFilename(ctx, p.Filename)
 }
 
 // DeleteContact soft-deletes a contact and appends a 'delete' change.

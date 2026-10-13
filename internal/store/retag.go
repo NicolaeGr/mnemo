@@ -11,14 +11,15 @@ import (
 
 // Retag applies add/remove of the actor's own book tags to a live contact.
 // Removing any book is allowed, including the system book; if nothing remains the
-// set is repaired to the system book (I1). No change rows are written, but the
-// sync_epoch of every principal whose visibility of the card changed is bumped.
+// set is repaired to the system book (I1). The card's CATEGORIES is rewritten to
+// follow the new book set, which appends a 'put' when it changes; the sync_epoch
+// of every principal whose visibility of the card changed is also bumped.
 // Caller holds LockSync.
 func (s ScopedStore) Retag(ctx context.Context, contactID int64, addBookIDs, removeBookIDs []int64) error {
-	var one int
+	var filename string
 	err := s.Tx.QueryRow(ctx, `
-		SELECT 1 FROM contacts WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
-		contactID, s.Actor.UserID).Scan(&one)
+		SELECT filename FROM contacts WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+		contactID, s.Actor.UserID).Scan(&filename)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.ErrNotFound
 	}
@@ -45,6 +46,9 @@ func (s ScopedStore) Retag(ctx context.Context, contactID int64, addBookIDs, rem
 
 	after := applyRetag(before, systemID, active, addBookIDs, removeBookIDs)
 	if err := s.replaceTags(ctx, contactID, after); err != nil {
+		return err
+	}
+	if _, err := s.applyCategories(ctx, filename, false); err != nil {
 		return err
 	}
 

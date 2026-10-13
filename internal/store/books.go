@@ -266,6 +266,11 @@ func (s ScopedStore) DeleteBook(ctx context.Context, bookID int64) error {
 		return model.ErrConflict
 	}
 
+	files, err := s.filenamesInBook(ctx, bookID)
+	if err != nil {
+		return err
+	}
+
 	var systemID int64
 	if err := s.Tx.QueryRow(ctx,
 		`SELECT id FROM books WHERE owner_user_id = $1 AND is_system`, s.Actor.UserID,
@@ -283,6 +288,11 @@ func (s ScopedStore) DeleteBook(ctx context.Context, bookID int64) error {
 	}
 	if _, err := s.Tx.Exec(ctx, `DELETE FROM books WHERE id = $1`, bookID); err != nil {
 		return err
+	}
+	for _, f := range files {
+		if _, err := s.applyCategories(ctx, f, false); err != nil {
+			return err
+		}
 	}
 	return s.bumpAllPrincipals(ctx)
 }
@@ -324,17 +334,20 @@ func (s ScopedStore) principalIDs(ctx context.Context) ([]int64, error) {
 	return ids, rows.Err()
 }
 
-// RenameBook updates a book's display name. Renames do not change what a
-// principal syncs, so there is no epoch bump.
+// RenameBook updates a book's display name and rewrites the CATEGORIES of every
+// contact tagged in it, since group names follow book names. A rename does not
+// change what a principal syncs, so there is no epoch bump.
 func (s ScopedStore) RenameBook(ctx context.Context, bookID int64, displayName string) error {
 	if err := s.requireOwnedBook(ctx, bookID); err != nil {
 		return err
 	}
-	_, err := s.Tx.Exec(ctx, `
+	if _, err := s.Tx.Exec(ctx, `
 		UPDATE books SET display_name = $3
 		 WHERE owner_user_id = $1 AND id = $2`,
-		s.Actor.UserID, bookID, displayName)
-	return err
+		s.Actor.UserID, bookID, displayName); err != nil {
+		return err
+	}
+	return s.refreshBookCategories(ctx, bookID)
 }
 
 // SetBookDescription updates a book's description. Device-invisible, so no epoch
