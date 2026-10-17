@@ -78,12 +78,14 @@ type ContactsData struct {
 	Contacts     []ContactView
 	Books        []store.Book
 	Q            string
+	QDesc        string
 	Sort         string
 	Dir          string
 	SortExplicit bool
 	Page         int
 	Per          int
 	Total        int
+	Warnings     []string
 	ErrMsg       string
 	Notice       string
 }
@@ -103,20 +105,13 @@ func contactsViewData(d ContactsData) string {
 		"per":      d.Per,
 		"total":    d.Total,
 		"ids":      ContactIDs(d),
-		"specs":    store.ContactSearchFields(),
-		"lists":    bookNames(d.Books),
+		"warnings": d.Warnings,
+		"desc":     d.QDesc,
+		"suggest":  "/dashboard/contacts/suggest",
 		"endpoint": "/dashboard/contacts/search",
 		"target":   "#contacts-rows",
 	})
 	return string(data)
-}
-
-func bookNames(books []store.Book) []string {
-	out := make([]string, 0, len(books))
-	for _, b := range books {
-		out = append(out, b.DisplayName)
-	}
-	return out
 }
 
 templ ContactsPage(d ContactsData) {
@@ -150,73 +145,86 @@ templ ContactTable(d ContactsData) {
 		if d.Notice != "" {
 			<p class="rounded-md border border-emerald-600/40 bg-emerald-600/10 px-3 py-2 text-sm text-emerald-700">{ d.Notice }</p>
 		}
-		<div class="flex flex-wrap items-center gap-3">
-			<div class="relative min-w-[16rem] max-w-md flex-1" @click.outside="closeCombo()">
-				<span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-					@Icon("search")
-				</span>
-				<input
-					x-ref="search"
-					type="search"
-					x-model="q"
-					@input="onSearchInput()"
-					@keydown="onSearchKeydown($event)"
-					placeholder="Search: name:Josh, has:phone, in:Work, no has:email"
-					autocomplete="off"
-					role="combobox"
-					aria-autocomplete="list"
-					:aria-expanded="comboOpen ? 'true' : 'false'"
-					class="h-9 w-full rounded-md border border-input bg-background pl-9 pr-9 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"
-				/>
-				<span x-show="loading" x-cloak class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-					@Icon("spinner")
-				</span>
-				<button
-					type="button"
-					x-show="q.length > 0 && !loading"
-					x-cloak
-					aria-label="Clear search"
-					title="Clear search"
-					@click="clearQuery()"
-					class="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-				>
-					@Icon("x")
-				</button>
-				<div
-					x-show="comboOpen"
-					x-cloak
-					role="listbox"
-					class="absolute left-0 right-0 top-full z-30 mt-1 max-h-60 w-full overflow-y-auto rounded-md border border-border bg-background p-1 shadow-lg"
-				>
-					<template x-for="(s, i) in comboItems" :key="s.insert + i">
-						<button
-							type="button"
-							role="option"
-							tabindex="-1"
-							:aria-selected="i === comboIndex"
-							@mousedown.prevent="pickSuggestion(s)"
-							@mouseenter="comboIndex = i"
-							:class="i === comboIndex ? 'bg-accent/15 text-accent' : ''"
-							class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors"
-						>
-							<span class="text-[10px] font-medium uppercase tracking-wide" x-text="s.kind || 'Match'"></span>
-							<span class="truncate" x-text="s.label"></span>
-						</button>
-					</template>
+		<div class="flex flex-wrap items-start gap-3">
+			<div class="min-w-[18rem] max-w-2xl flex-1">
+				<div class="relative" @click.outside="closeCombo()">
+					<span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+						@Icon("search")
+					</span>
+					<input
+						x-ref="search"
+						type="search"
+						x-model="q"
+						@input="onSearchInput()"
+						@keyup="onCaretMove($event)"
+						@click="onCaretMove($event)"
+						@focus="queueSuggest()"
+						@keydown="onSearchKeydown($event)"
+						placeholder={ "Search contacts — name:\"Josh Smith\", has:phone, in:\"Work\", no has:email" }
+						autocomplete="off"
+						role="combobox"
+						aria-autocomplete="list"
+						:aria-expanded="comboOpen ? 'true' : 'false'"
+						class="h-9 w-full rounded-md border border-input bg-background pl-9 pr-9 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"
+					/>
+					<span x-show="loading" x-cloak class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+						@Icon("spinner")
+					</span>
+					<button
+						type="button"
+						x-show="q.length > 0 && !loading"
+						x-cloak
+						aria-label="Clear search"
+						title="Clear search"
+						@click="clearQuery()"
+						class="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+					>
+						@Icon("x")
+					</button>
+					<div
+						x-show="comboOpen"
+						x-cloak
+						role="listbox"
+						class="absolute left-0 right-0 top-full z-30 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-border bg-background p-1 shadow-lg"
+					>
+						<template x-for="(s, i) in comboItems" :key="s.insert + i">
+							<button
+								type="button"
+								role="option"
+								tabindex="-1"
+								:aria-selected="i === comboIndex"
+								@mousedown.prevent="pickSuggestion(s)"
+								@mouseenter="comboIndex = i"
+								:class="i === comboIndex ? 'bg-accent/15 text-accent' : ''"
+								class="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors"
+							>
+								<span class="min-w-0 flex-1">
+									<span class="block truncate text-xs" x-text="s.label"></span>
+									<span class="block truncate font-mono text-[10px] text-muted-foreground" x-text="s.description || s.insert"></span>
+								</span>
+								<span class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground" x-text="s.kind"></span>
+							</button>
+						</template>
+					</div>
 				</div>
+				<div class="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 pt-0.5 text-[11px] leading-5 text-muted-foreground">
+					<span class="font-medium">Examples</span>
+					<button type="button" @click="insertToken('name:&quot;Josh Smith&quot;')" class="font-mono underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground">name:"Josh Smith"</button>
+					<span aria-hidden="true">·</span>
+					<button type="button" @click="insertToken('has:phone')" class="font-mono underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground">has:phone</button>
+					<span aria-hidden="true">·</span>
+					<button type="button" @click="insertToken('in:&quot;Work&quot;')" class="font-mono underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground">in:"Work"</button>
+					<span aria-hidden="true">·</span>
+					<button type="button" @click="insertToken('no has:email')" class="font-mono underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground">no has:email</button>
+					<span aria-hidden="true">·</span>
+					<button type="button" @click="insertToken('updated>30d')" class="font-mono underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground">updated>30d</button>
+				</div>
+				<p x-show="showDesc" x-cloak class="mt-1 text-[11px] text-muted-foreground">
+					Interpreted as <span class="text-foreground" x-text="queryDesc"></span>
+				</p>
+				<p x-show="warnings.length" x-cloak class="mt-1 text-[11px] text-red-600" x-text="warnings.join(' · ')"></p>
 			</div>
 			<span class="ml-auto text-sm text-muted-foreground"><span x-text="countLabel"></span></span>
-		</div>
-		<div class="flex flex-wrap items-center justify-end gap-2">
-			<span class="text-xs text-muted-foreground">Filters:</span>
-			<span
-				class="grid h-5 w-5 cursor-help place-items-center rounded-full border border-border text-[10px] font-semibold text-muted-foreground"
-				title="Click a filter to add it to the search."
-				aria-label="Click a filter to add it to the search."
-			>?</span>
-			<button type="button" @click="insertToken('has:phone')" class="btn-ghost inline-flex h-7 items-center rounded-md px-2 text-xs transition-colors">Has phone</button>
-			<button type="button" @click="insertToken('has:email')" class="btn-ghost inline-flex h-7 items-center rounded-md px-2 text-xs transition-colors">Has email</button>
-			<button type="button" @click="insertToken('untagged:1')" class="btn-ghost inline-flex h-7 items-center rounded-md px-2 text-xs transition-colors">Untagged</button>
 		</div>
 		<div x-show="hasSelection" x-cloak class="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
 			<span><span x-text="selected.length"></span> selected</span>
@@ -400,10 +408,19 @@ templ ContactRow(c ContactView, books []store.Book) {
 
 templ contactsEmpty(d ContactsData) {
 	if d.Q != "" {
-		@EmptyState("No matches", "Nothing matched \u201c"+d.Q+"\u201d in your contacts.", clearSearchLink())
+		@EmptyState("No matches", "Nothing matched \u201c"+emptyPhrase(d)+"\u201d in your contacts.", clearSearchLink())
 	} else {
 		@EmptyState("No contacts yet", "Add your first contact to get started.", addContact())
 	}
+}
+
+// emptyPhrase prefers the human description of the query, falling back to the
+// raw text when the parser could not understand anything.
+func emptyPhrase(d ContactsData) string {
+	if d.QDesc != "" {
+		return d.QDesc
+	}
+	return d.Q
 }
 
 templ clearSearchLink() {

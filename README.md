@@ -40,7 +40,7 @@ so use the flag only on a trusted network.
   - `POST /principals` mints a device token (returned once).
   - `GET|POST /books`, `PATCH|DELETE /books/{id}`.
   - `POST /contacts/{id}/tags` to attach/detach books.
-  - `GET /contacts?q=` to search by name or phone digits.
+  - `GET /contacts?q=` to search with the contact query language below.
   - `POST /contacts` and `PATCH /contacts/{id}` take name parts, property rows, addresses, and tags; a raw `vcard` string also works.
   - `POST /events/force-resync`.
 - **Admin UI** at `/login` then `/dashboard`: books, devices, contacts, and settings, server-rendered with htmx.
@@ -49,6 +49,30 @@ Requests authenticate either with a device token
 (`Authorization: Bearer <token>`) or with Basic auth (the account password,
 which sees every book). A token's tier gates which books it can see; password
 auth is tier-all.
+
+## Contact search
+
+The admin search box and `GET /api/v1/contacts?q=` share one query language.
+Terms are ANDed by default; `or`, `not`/`no`/`-`, and parentheses change that.
+
+| Syntax                              | Meaning                             |
+| ----------------------------------- | ----------------------------------- |
+| `josh`                              | any free-text field contains `josh` |
+| `"josh smith"`                      | one phrase                          |
+| `name:josh`                         | name contains `josh`                |
+| `name="Josh Smith"`                 | exact name                          |
+| `name:jo*`                          | name starts with `jo`               |
+| `email:*`                           | has an email                        |
+| `has:phone`, `has:email`, `has:org` | has that field                      |
+| `in:"Family Reunion"` or `in:#42`   | in a list                           |
+| `untagged:true`                     | not in any list                     |
+| `no has:email`                      | no email                            |
+| `updated>30d`                       | updated in the last 30 days         |
+| `(org:acme or org:beta) -in:Work`   | grouping and negation               |
+
+Unknown fields and invalid values do not blank the result; they are reported as
+warnings next to the search box. The UI also renders the parsed query as human
+text, so `no has:email` becomes "With no email".
 
 ## Layout
 
@@ -60,6 +84,7 @@ internal/
                        by the admin form and REST
   model/               plain structs + error sentinels
   store/               migrations (embed.FS) and scoped repositories
+  search/              typed query language: AST, lexer/parser, descriptions
   resolve/             which books a caller can see (tier + overrides)
   api/                 /api/v1 handlers
   jobs/                outbox dispatcher + tombstone purge loop

@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf16"
 
 	"github.com/a-h/templ"
 	"github.com/emersion/go-vcard"
@@ -76,6 +78,7 @@ func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) ht
 
 	mux.Handle("GET /dashboard/contacts", a.dashPage("Contacts", a.contactsLeaf))
 	mux.Handle("GET /dashboard/contacts/search", a.requireSession(http.HandlerFunc(a.searchContacts)))
+	mux.Handle("GET /dashboard/contacts/suggest", a.requireSession(http.HandlerFunc(a.suggestContacts)))
 	mux.Handle("GET /dashboard/contacts/new", a.modal(a.contactAddModal))
 	mux.Handle("GET /dashboard/contacts/bulk-modal", a.modal(a.bulkListsModal))
 	mux.Handle("GET /dashboard/contacts/export/modal", a.modal(a.exportModal))
@@ -685,9 +688,11 @@ func (a *Admin) searchContacts(w http.ResponseWriter, r *http.Request) {
 	data.ErrMsg = errorText(err)
 	payload, jerr := json.Marshal(map[string]any{
 		"listmeta": map[string]any{
-			"total": data.Total,
-			"page":  data.Page,
-			"ids":   pages.ContactIDs(data),
+			"total":    data.Total,
+			"page":     data.Page,
+			"ids":      pages.ContactIDs(data),
+			"warnings": data.Warnings,
+			"desc":     data.QDesc,
 		},
 	})
 	if jerr != nil {
@@ -695,6 +700,70 @@ func (a *Admin) searchContacts(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("HX-Trigger", string(payload))
 	renderTempl(w, r, pages.ContactRows(data))
+}
+
+// suggestContacts answers the search box's completion requests. The server owns
+// the grammar, so the browser only has to replace a span with Insert.
+func (a *Admin) suggestContacts(w http.ResponseWriter, r *http.Request) {
+	raw := r.URL.Query().Get("q")
+	caret := utf16Length(raw)
+	if v := r.URL.Query().Get("caret"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			caret = n
+		}
+	}
+	byteCaret := utf16ToByte(raw, caret)
+
+	items := []store.Suggestion{}
+	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
+		var err error
+		items, err = s.SuggestContacts(r.Context(), raw, byteCaret)
+		return err
+	})
+	if err != nil {
+		http.Error(w, "search suggestions unavailable", http.StatusInternalServerError)
+		return
+	}
+	for i := range items {
+		items[i].Start = byteToUTF16(raw, items[i].Start)
+		items[i].End = byteToUTF16(raw, items[i].End)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+}
+
+// utf16Length counts JS string units, which is what input.selectionStart uses.
+func utf16Length(s string) int { return len(utf16.Encode([]rune(s))) }
+
+// utf16ToByte converts a JS caret offset to a byte offset in s.
+func utf16ToByte(s string, units int) int {
+	if units <= 0 {
+		return 0
+	}
+	n := 0
+	for i, r := range s {
+		if n >= units {
+			return i
+		}
+		if r > 0xFFFF {
+			n += 2
+		} else {
+			n++
+		}
+	}
+	return len(s)
+}
+
+// byteToUTF16 converts a byte offset in s to a JS string offset.
+func byteToUTF16(s string, off int) int {
+	if off <= 0 {
+		return 0
+	}
+	if off > len(s) {
+		off = len(s)
+	}
+	return len(utf16.Encode([]rune(s[:off])))
 }
 
 func (a *Admin) contactAddModal(r *http.Request) (string, templ.Component) {
@@ -767,7 +836,6 @@ func (a *Admin) contactFormData(r *http.Request, id int64) (pages.ContactFormDat
 // contactQuery is the parsed query string of the contacts list.
 type contactQuery struct {
 	q            string
-	bookID       *int64
 	sort         string
 	dir          string
 	page         int
@@ -793,11 +861,6 @@ func contactQueryFrom(r *http.Request) contactQuery {
 	if out.dir != "desc" {
 		out.dir = "asc"
 	}
-	if v := values.Get("book"); v != "" {
-		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
-			out.bookID = &id
-		}
-	}
 	return out
 }
 
@@ -811,33 +874,29 @@ func atoiDefault(s string, def int) int {
 // contactsData runs the search and assembles everything the page needs. The
 // search error is returned separately so the caller decides how to show it.
 func (a *Admin) contactsData(r *http.Request, qry contactQuery) (pages.ContactsData, error) {
-	views, books, total, err := a.contactViews(r, qry)
+	views, books, total, warnings, description, err := a.contactViews(r, qry)
 	data := pages.ContactsData{
 		Contacts:     views,
 		Books:        books,
 		Q:            qry.q,
+		QDesc:        sentenceCase(description),
 		Sort:         qry.sort,
 		Dir:          qry.dir,
 		SortExplicit: qry.sortExplicit,
 		Page:         qry.page,
 		Per:          contactPer,
 		Total:        total,
+		Warnings:     warnings,
 		Notice:       importNotice(r),
-	}
-	if qry.bookID != nil {
-		data.BookID = strconv.FormatInt(*qry.bookID, 10)
-		for _, b := range books {
-			if b.ID == *qry.bookID {
-				data.BookName = b.DisplayName
-			}
-		}
 	}
 	return data, err
 }
 
-func (a *Admin) contactViews(r *http.Request, qry contactQuery) ([]pages.ContactView, []store.Book, int, error) {
+func (a *Admin) contactViews(r *http.Request, qry contactQuery) ([]pages.ContactView, []store.Book, int, []string, string, error) {
 	var views []pages.ContactView
 	var active []store.Book
+	var warnings []string
+	var description string
 	total := 0
 	err := store.WithTx(r.Context(), a.pool, a.actor(r), func(s store.ScopedStore) error {
 		books, err := s.ListBooks(r.Context())
@@ -846,18 +905,19 @@ func (a *Admin) contactViews(r *http.Request, qry contactQuery) ([]pages.Contact
 		}
 		active = activeBooks(books)
 		res, err := s.Search(r.Context(), store.SearchParams{
-			Query:  qry.q,
-			BookID: qry.bookID,
-			Page:   qry.page,
-			Per:    contactPer,
-			Sort:   qry.sort,
-			Dir:    qry.dir,
-			Rank:   !qry.sortExplicit,
+			Query: qry.q,
+			Page:  qry.page,
+			Per:   contactPer,
+			Sort:  qry.sort,
+			Dir:   qry.dir,
+			Rank:  !qry.sortExplicit,
 		})
 		if err != nil {
 			return err
 		}
 		total = res.Total
+		warnings = res.Warnings
+		description = res.Description
 		views = make([]pages.ContactView, 0, len(res.Contacts))
 		for _, c := range res.Contacts {
 			ids, err := s.ContactBookIDs(r.Context(), c.ID)
@@ -872,7 +932,17 @@ func (a *Admin) contactViews(r *http.Request, qry contactQuery) ([]pages.Contact
 		}
 		return nil
 	})
-	return views, active, total, err
+	return views, active, total, warnings, description, err
+}
+
+// sentenceCase capitalises the first rune of a description for the UI.
+func sentenceCase(s string) string {
+	if s == "" {
+		return ""
+	}
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
 }
 
 func contactView(c store.Contact, tagged map[int64]bool) pages.ContactView {
