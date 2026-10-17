@@ -1,0 +1,149 @@
+package pages
+
+import (
+	"strconv"
+
+	"github.com/nicolaegr/mnemo/internal/web/uictx"
+)
+
+// ExportData scopes the export modal. BookID is zero for a whole-address-book
+// export. IDs carries a contact selection made on the contacts page.
+type ExportData struct {
+	BookID   int64
+	BookName string
+	IDs      []int64
+	Summary  string
+	BaseName string
+	Single   bool
+}
+
+func exportID(id int64) string {
+	return strconv.FormatInt(id, 10)
+}
+
+func categoryGridClass(inList bool) string {
+	if inList {
+		return "grid grid-cols-3 gap-2"
+	}
+	return "grid grid-cols-2 gap-2"
+}
+
+// ExportModal is the export form. It submits as a normal GET so the browser
+// downloads the response instead of htmx swapping it into the page.
+templ ExportModal(d ExportData) {
+	<form method="get" action="/dashboard/contacts/export" class="space-y-5">
+		if d.BookID != 0 {
+			<input type="hidden" name="book" value={ exportID(d.BookID) }/>
+		}
+		for _, id := range d.IDs {
+			<input type="hidden" name="id" value={ exportID(id) }/>
+		}
+		<div>
+			<label class="mb-1 block text-xs font-medium text-muted-foreground" for="export-name">Name</label>
+			<input
+				id="export-name"
+				name="name"
+				value={ d.BaseName }
+				required
+				class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-ring"
+			/>
+			<p class="mt-1 text-xs text-muted-foreground">The extension is added when the file downloads.</p>
+		</div>
+		if d.Single {
+			<input type="hidden" name="format" value="vcf"/>
+		} else {
+			<fieldset>
+				<legend class="mb-2 text-xs font-medium text-muted-foreground">Format</legend>
+				<div class="space-y-2">
+					<label class="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3 transition-colors hover:bg-muted/40">
+						<input type="radio" name="format" value="vcf" checked class="mt-0.5 h-4 w-4" style="accent-color: var(--accent)"/>
+						<span>
+							<span class="block text-sm">Single file (.vcf)</span>
+							<span class="block text-xs text-muted-foreground">Every card in one vCard file.</span>
+						</span>
+					</label>
+					<label class="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3 transition-colors hover:bg-muted/40">
+						<input type="radio" name="format" value="zip" class="mt-0.5 h-4 w-4" style="accent-color: var(--accent)"/>
+						<span>
+							<span class="block text-sm">Zip archive (individual files)</span>
+							<span class="block text-xs text-muted-foreground">One .vcf entry per contact.</span>
+						</span>
+					</label>
+				</div>
+			</fieldset>
+		}
+		<fieldset>
+			<legend class="mb-2 text-xs font-medium text-muted-foreground">Categories</legend>
+			<div class={ categoryGridClass(d.BookID != 0) }>
+				<label class="flex cursor-pointer items-start gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/40">
+					<input type="radio" name="categories" value="include" checked class="mt-0.5 h-4 w-4" style="accent-color: var(--accent)"/>
+					<span>
+						<span class="block text-sm">Include categories</span>
+						<span class="block text-xs text-muted-foreground">Keep every list name.</span>
+					</span>
+				</label>
+				if d.BookID != 0 {
+					<label class="flex cursor-pointer items-start gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/40">
+						<input type="radio" name="categories" value="only" class="mt-0.5 h-4 w-4" style="accent-color: var(--accent)"/>
+						<span>
+							<span class="block text-sm">Exclude other lists</span>
+							<span class="block text-xs text-muted-foreground">Keep only { d.BookName }.</span>
+						</span>
+					</label>
+				}
+				<label class="flex cursor-pointer items-start gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/40">
+					<input type="radio" name="categories" value="exclude" class="mt-0.5 h-4 w-4" style="accent-color: var(--accent)"/>
+					<span>
+						<span class="block text-sm">Exclude categories</span>
+						<span class="block text-xs text-muted-foreground">Remove CATEGORIES.</span>
+					</span>
+				</label>
+			</div>
+		</fieldset>
+		<div class="flex items-center justify-between gap-2 pt-2">
+			<p class="text-xs text-muted-foreground">{ d.Summary }</p>
+			@PrimaryButton("Export")
+		</div>
+	</form>
+}
+
+// ImportModal uploads a vCard or zip file. It posts as a normal multipart form
+// and the handler redirects back to the contacts page with a summary.
+templ ImportModal() {
+	<form method="post" action="/dashboard/contacts/import" enctype="multipart/form-data" class="space-y-5">
+		<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+		<div>
+			<label class="mb-1 block text-xs font-medium text-muted-foreground" for="import-file">File</label>
+			<input
+				id="import-file"
+				type="file"
+				name="file"
+				accept=".vcf,.zip,text/vcard,application/zip"
+				required
+				class="block w-full cursor-pointer rounded-md border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-muted file:px-3 file:py-1 file:text-sm file:text-foreground"
+			/>
+		</div>
+		<p class="text-xs text-muted-foreground">
+			Accepts a .vcf file, a .zip of .vcf files, or a vCard export from another app.
+			Contacts join the lists named in their CATEGORIES. Lists that do not exist are
+			created, and contacts without CATEGORIES stay untagged.
+		</p>
+		<div class="flex justify-end pt-2">
+			@PrimaryButton("Import")
+		</div>
+	</form>
+}
+
+// transferAction renders the header button that opens a transfer modal.
+templ transferAction(label, icon, modalURL string) {
+	<button
+		type="button"
+		class="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm transition-colors hover:bg-muted"
+		hx-get={ modalURL }
+		hx-target="#modal-root"
+		hx-swap="innerHTML"
+	>
+		@Icon(icon)
+		<span>{ label }</span>
+	</button>
+}

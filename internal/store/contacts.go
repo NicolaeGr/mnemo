@@ -147,6 +147,18 @@ func (s ScopedStore) ContactBookIDs(ctx context.Context, contactID int64) ([]int
 	return ids, rows.Err()
 }
 
+// LiveUIDTaken reports whether the actor already has a live contact with the
+// given UID. Import uses it to skip duplicates before the unique index fires and
+// aborts the surrounding transaction.
+func (s ScopedStore) LiveUIDTaken(ctx context.Context, uid string) (bool, error) {
+	var taken bool
+	err := s.Tx.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM contacts
+		               WHERE user_id = $1 AND uid = $2 AND deleted_at IS NULL)`,
+		s.Actor.UserID, uid).Scan(&taken)
+	return taken, err
+}
+
 // LiveContactByFilename returns one live contact by filename; miss → ErrNotFound.
 func (s ScopedStore) LiveContactByFilename(ctx context.Context, filename string) (Contact, error) {
 	return scanContact(s.Tx.QueryRow(ctx, `

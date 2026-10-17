@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -146,6 +148,88 @@ func (s ScopedStore) CreateBook(ctx context.Context, slug, displayName string, d
 		return Book{}, model.ErrConflict
 	}
 	return b, err
+}
+
+// EnsureBook returns the actor's book whose display name matches name, ignoring
+// case, creating it when absent. A created book is active and carries the given
+// approval flag, so a user import can approve lists while a DAV-triggered import
+// leaves them unapproved. Caller holds LockSync so concurrent imports cannot race
+// for the same slug.
+func (s ScopedStore) EnsureBook(ctx context.Context, name string, approved bool) (Book, bool, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Book{}, false, model.ErrPrecondition
+	}
+
+	b, err := scanBook(s.Tx.QueryRow(ctx, `
+		SELECT id, owner_user_id, slug, display_name, description, sort_order,
+		       is_active, synced_tiers::text[], created_at
+		  FROM books
+		 WHERE owner_user_id = $1 AND lower(display_name) = lower($2)
+		 ORDER BY id
+		 LIMIT 1`, s.Actor.UserID, name))
+	if err == nil {
+		return b, false, nil
+	}
+	if !errors.Is(err, model.ErrNotFound) {
+		return Book{}, false, err
+	}
+
+	base := bookSlug(name)
+	for n := 1; n <= 1000; n++ {
+		slug := base
+		if n > 1 {
+			slug = base + "-" + strconv.Itoa(n)
+		}
+		var taken bool
+		if err := s.Tx.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM books WHERE owner_user_id = $1 AND slug = $2)`,
+			s.Actor.UserID, slug).Scan(&taken); err != nil {
+			return Book{}, false, err
+		}
+		if taken {
+			continue
+		}
+		b, err = scanBook(s.Tx.QueryRow(ctx, `
+			INSERT INTO books (owner_user_id, slug, display_name, is_approved)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (owner_user_id, slug) DO NOTHING
+			RETURNING id, owner_user_id, slug, display_name, description, sort_order,
+			          is_active, synced_tiers::text[], created_at`,
+			s.Actor.UserID, slug, name, approved))
+		if errors.Is(err, model.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return Book{}, false, err
+		}
+		return b, true, nil
+	}
+	return Book{}, false, model.ErrConflict
+}
+
+// bookSlug reduces a display name to a valid book slug: lowercase letters and
+// digits, with every other run collapsed to one hyphen.
+func bookSlug(name string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			dash = false
+		default:
+			if b.Len() > 0 && !dash {
+				b.WriteByte('-')
+				dash = true
+			}
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		return "list"
+	}
+	return slug
 }
 
 // SetBookActive activates/deactivates a book. Flipping is_active changes the

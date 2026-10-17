@@ -2,7 +2,9 @@ package pages
 
 import (
 	"encoding/json"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/nicolaegr/mnemo/internal/store"
 	"github.com/nicolaegr/mnemo/internal/web/uictx"
@@ -35,7 +37,7 @@ func listsSortData(sort string) string {
 
 templ ListsPage(d ListsData) {
 	<div class="space-y-6">
-		@PageHeader("Lists", countLabel(len(d.Summaries), "list"), newList())
+		@PageHeader("Lists", countLabel(len(d.Summaries), "list"), listsActions())
 		<div x-data={ "listSort(" + listsSortData(d.Sort) + ")" } class="flex flex-wrap items-center gap-2 text-sm">
 			<span class="text-muted-foreground">Sort by</span>
 			<button type="button" @click="setSort('name')" :class="sort === 'name' ? activeClass : idleClass">Name</button>
@@ -87,16 +89,28 @@ templ ListCard(s store.BookSummary) {
 					}
 				</div>
 			</div>
-			<button
-				type="button"
-				class="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-				title="Edit list"
-				hx-get={ "/dashboard/books/" + strconv.FormatInt(s.Book.ID, 10) + "/edit" }
-				hx-target="#modal-root"
-				hx-swap="innerHTML"
-			>
-				@Icon("edit")
-			</button>
+			<div class="flex shrink-0 items-center gap-2">
+				<button
+					type="button"
+					class="btn-ghost grid h-8 w-8 place-items-center rounded-md transition-colors"
+					title="Export list"
+					hx-get={ "/dashboard/contacts/export/modal?book=" + strconv.FormatInt(s.Book.ID, 10) }
+					hx-target="#modal-root"
+					hx-swap="innerHTML"
+				>
+					@Icon("download")
+				</button>
+				<button
+					type="button"
+					class="btn-ghost grid h-8 w-8 shrink-0 place-items-center rounded-md transition-colors"
+					title="Edit list"
+					hx-get={ "/dashboard/books/" + strconv.FormatInt(s.Book.ID, 10) + "/edit" }
+					hx-target="#modal-root"
+					hx-swap="innerHTML"
+				>
+					@Icon("edit")
+				</button>
+			</div>
 		</div>
 		<div class="border-t border-border">
 			if len(s.Preview) == 0 {
@@ -112,8 +126,8 @@ templ ListCard(s store.BookSummary) {
 		if s.ContactCount > 0 {
 			<div class="mt-auto border-t border-border">
 				<a
-					href={ listContactsURL(s.Book.ID) }
-					hx-get={ listContactsURL(s.Book.ID) }
+					href={ listContactsURL(s.Book.DisplayName) }
+					hx-get={ listContactsURL(s.Book.DisplayName) }
 					hx-push-url="true"
 					class="flex items-center justify-between gap-3 px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
 				>
@@ -139,8 +153,11 @@ func previewSecondary(p store.ContactPreview) string {
 	return p.Email
 }
 
-func listContactsURL(bookID int64) string {
-	return "/dashboard/contacts?book=" + strconv.FormatInt(bookID, 10)
+// listContactsURL opens the contacts page with an in: filter for the list. The
+// search box owns filter state, so the list name travels as a query token rather
+// than a separate book parameter.
+func listContactsURL(name string) string {
+	return "/dashboard/contacts?q=" + url.QueryEscape(`in:"`+strings.ReplaceAll(name, `"`, `\"`)+`"`)
 }
 
 // listFooterLabel names the card's footer action: how many more contacts the
@@ -150,6 +167,13 @@ func listFooterLabel(s store.BookSummary) string {
 		return "View " + strconv.Itoa(remaining) + " more"
 	}
 	return "View all contacts"
+}
+
+templ listsActions() {
+	<div class="flex items-center gap-2">
+		@transferAction("Import", "upload", "/dashboard/contacts/import/modal")
+		@newList()
+	</div>
 }
 
 templ newList() {

@@ -84,9 +84,8 @@ type ContactsData struct {
 	Page         int
 	Per          int
 	Total        int
-	BookID       string
-	BookName     string
 	ErrMsg       string
+	Notice       string
 }
 
 func contactsViewData(d ContactsData) string {
@@ -103,19 +102,36 @@ func contactsViewData(d ContactsData) string {
 		"page":     d.Page,
 		"per":      d.Per,
 		"total":    d.Total,
-		"book":     d.BookID,
 		"ids":      ContactIDs(d),
 		"specs":    store.ContactSearchFields(),
+		"lists":    bookNames(d.Books),
 		"endpoint": "/dashboard/contacts/search",
 		"target":   "#contacts-rows",
 	})
 	return string(data)
 }
 
+func bookNames(books []store.Book) []string {
+	out := make([]string, 0, len(books))
+	for _, b := range books {
+		out = append(out, b.DisplayName)
+	}
+	return out
+}
+
 templ ContactsPage(d ContactsData) {
 	<div class="space-y-6">
-		@PageHeader("Contacts", countLabel(d.Total, "contact"), addContact())
+		@PageHeader("Contacts", countLabel(d.Total, "contact"), contactsActions())
 		@ContactsList(d)
+	</div>
+}
+
+// contactsActions is the contacts header. Export lives on the selected rows,
+// the row menu, and the contact view, not on the page.
+templ contactsActions() {
+	<div class="flex items-center gap-2">
+		@transferAction("Import", "upload", "/dashboard/contacts/import/modal")
+		@addContact()
 	</div>
 }
 
@@ -131,6 +147,9 @@ templ ContactsList(d ContactsData) {
 // stay mounted while the controller swaps only #contacts-rows.
 templ ContactTable(d ContactsData) {
 	<div x-data={ "listView(" + contactsViewData(d) + ")" } @listmeta.window="onMeta($event)" class="space-y-4">
+		if d.Notice != "" {
+			<p class="rounded-md border border-emerald-600/40 bg-emerald-600/10 px-3 py-2 text-sm text-emerald-700">{ d.Notice }</p>
+		}
 		<div class="flex flex-wrap items-center gap-3">
 			<div class="relative min-w-[16rem] max-w-md flex-1" @click.outside="closeCombo()">
 				<span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
@@ -142,7 +161,7 @@ templ ContactTable(d ContactsData) {
 					x-model="q"
 					@input="onSearchInput()"
 					@keydown="onSearchKeydown($event)"
-					placeholder="Search — try name:Josh, org:Acme, has:phone"
+					placeholder="Search: name:Josh, has:phone, in:Work, no has:email"
 					autocomplete="off"
 					role="combobox"
 					aria-autocomplete="list"
@@ -167,9 +186,9 @@ templ ContactTable(d ContactsData) {
 					x-show="comboOpen"
 					x-cloak
 					role="listbox"
-					class="absolute left-0 right-0 top-full z-30 mt-1 w-full overflow-hidden rounded-md border border-border bg-background p-1 shadow-lg"
+					class="absolute left-0 right-0 top-full z-30 mt-1 max-h-60 w-full overflow-y-auto rounded-md border border-border bg-background p-1 shadow-lg"
 				>
-					<template x-for="(s, i) in comboItems" :key="s.key">
+					<template x-for="(s, i) in comboItems" :key="s.insert + i">
 						<button
 							type="button"
 							role="option"
@@ -180,30 +199,41 @@ templ ContactTable(d ContactsData) {
 							:class="i === comboIndex ? 'bg-accent/15 text-accent' : ''"
 							class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors"
 						>
-							<span class="text-[10px] font-medium uppercase tracking-wide">Match</span>
+							<span class="text-[10px] font-medium uppercase tracking-wide" x-text="s.kind || 'Match'"></span>
 							<span class="truncate" x-text="s.label"></span>
 						</button>
 					</template>
 				</div>
 			</div>
-			if d.BookName != "" {
-				<a href="/dashboard/contacts" class="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs transition-colors hover:bg-border" title="Clear list filter">
-					in { d.BookName }
-					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
-				</a>
-			}
 			<span class="ml-auto text-sm text-muted-foreground"><span x-text="countLabel"></span></span>
 		</div>
-		<div class="flex flex-wrap items-center gap-2">
-			<button type="button" @click="toggleToken('has:phone')" class="inline-flex items-center rounded border px-1.5 py-0.5 text-xs transition-colors" :class="hasToken('has:phone') ? 'border-transparent bg-accent text-accent-foreground' : 'border-border text-muted-foreground hover:bg-muted'">Has phone</button>
-			<button type="button" @click="toggleToken('has:email')" class="inline-flex items-center rounded border px-1.5 py-0.5 text-xs transition-colors" :class="hasToken('has:email') ? 'border-transparent bg-accent text-accent-foreground' : 'border-border text-muted-foreground hover:bg-muted'">Has email</button>
-			<button type="button" @click="toggleToken('untagged:1')" class="inline-flex items-center rounded border px-1.5 py-0.5 text-xs transition-colors" :class="hasToken('untagged:1') ? 'border-transparent bg-accent text-accent-foreground' : 'border-border text-muted-foreground hover:bg-muted'">Untagged</button>
+		<div class="flex flex-wrap items-center justify-end gap-2">
+			<span class="text-xs text-muted-foreground">Filters:</span>
+			<span
+				class="grid h-5 w-5 cursor-help place-items-center rounded-full border border-border text-[10px] font-semibold text-muted-foreground"
+				title="Click a filter to add it to the search."
+				aria-label="Click a filter to add it to the search."
+			>?</span>
+			<button type="button" @click="insertToken('has:phone')" class="btn-ghost inline-flex h-7 items-center rounded-md px-2 text-xs transition-colors">Has phone</button>
+			<button type="button" @click="insertToken('has:email')" class="btn-ghost inline-flex h-7 items-center rounded-md px-2 text-xs transition-colors">Has email</button>
+			<button type="button" @click="insertToken('untagged:1')" class="btn-ghost inline-flex h-7 items-center rounded-md px-2 text-xs transition-colors">Untagged</button>
 		</div>
 		<div x-show="hasSelection" x-cloak class="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
 			<span><span x-text="selected.length"></span> selected</span>
 			<button
 				type="button"
-				class="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-600/40 px-3 text-xs text-red-600 transition-colors hover:bg-red-600/10"
+				class="btn-ghost inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors"
+				hx-get="/dashboard/contacts/export/modal"
+				hx-include=".contact-row-check"
+				hx-target="#modal-root"
+				hx-swap="innerHTML"
+			>
+				@Icon("download")
+				<span>Export</span>
+			</button>
+			<button
+				type="button"
+				class="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs text-red-600 transition-colors hover:bg-red-600/10"
 				hx-post="/dashboard/contacts/bulk"
 				hx-vals={ bulkVals("delete", uictx.From(ctx).CSRF) }
 				hx-include=".contact-row-check"
@@ -216,7 +246,7 @@ templ ContactTable(d ContactsData) {
 			</button>
 			<button
 				type="button"
-				class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted"
+				class="btn-ghost inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors"
 				hx-get="/dashboard/contacts/bulk-modal?mode=add"
 				hx-include=".contact-row-check"
 				hx-target="#modal-root"
@@ -227,7 +257,7 @@ templ ContactTable(d ContactsData) {
 			</button>
 			<button
 				type="button"
-				class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs transition-colors hover:bg-muted"
+				class="btn-ghost inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors"
 				hx-get="/dashboard/contacts/bulk-modal?mode=set"
 				hx-include=".contact-row-check"
 				hx-target="#modal-root"
@@ -236,16 +266,16 @@ templ ContactTable(d ContactsData) {
 				@Icon("lists")
 				<span>Set lists</span>
 			</button>
-			<button type="button" @click="clearSelection()" class="ml-auto text-xs text-muted-foreground transition-colors hover:text-foreground">Clear</button>
+			<button type="button" @click="clearSelection()" class="btn-ghost ml-auto inline-flex h-8 items-center rounded-md px-2.5 text-xs transition-colors">Clear</button>
 		</div>
 		<div class="overflow-hidden rounded-lg border border-border">
 			<table class="w-full text-sm">
 				<thead class="border-b border-border bg-muted/40">
 					<tr>
-						<th scope="col" class="w-px px-3 py-2">
+						<th scope="col" class="w-px py-2 pl-3 pr-1">
 							<input type="checkbox" aria-label="Select all contacts" class="h-4 w-4" style="accent-color: var(--accent)" :checked="allSelected" @change="toggleAll()"/>
 						</th>
-						<th scope="col" class="w-px px-3 py-2"><span class="sr-only">Actions</span></th>
+						<th scope="col" class="w-px px-1 py-2"><span class="sr-only">Actions</span></th>
 						@SortableTh("name", "Name", "")
 						<th scope="col" class="hidden px-3 py-2 text-left text-xs font-medium text-muted-foreground sm:table-cell">Phone</th>
 						<th scope="col" class="hidden px-3 py-2 text-left text-xs font-medium text-muted-foreground xl:table-cell">Lists</th>
@@ -293,7 +323,7 @@ templ ContactRows(d ContactsData) {
 
 templ ContactRow(c ContactView, books []store.Book) {
 	<tr class="hover:bg-muted/40">
-		<td class="w-px px-3 py-2">
+		<td class="w-px py-2 pl-3 pr-1">
 			<input
 				type="checkbox"
 				name="id"
@@ -305,11 +335,11 @@ templ ContactRow(c ContactView, books []store.Book) {
 				@change={ "toggle(" + strconv.FormatInt(c.Contact.ID, 10) + ")" }
 			/>
 		</td>
-		<td class="w-px px-3 py-2">
+		<td class="w-px px-1 py-2">
 			<div class="relative" x-data="rowMenu()" @click.outside="close()">
 				<button
 					type="button"
-					class="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+					class="btn-ghost grid h-8 w-8 place-items-center rounded-md transition-colors"
 					title="Actions"
 					@click="toggle($event)"
 				>
@@ -323,6 +353,7 @@ templ ContactRow(c ContactView, books []store.Book) {
 				>
 					<button type="button" class="menu-item" @click="close()" hx-get={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/view" } hx-target="#modal-root" hx-swap="innerHTML">View</button>
 					<button type="button" class="menu-item" @click="close()" hx-get={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/edit" } hx-target="#modal-root" hx-swap="innerHTML">Edit</button>
+					<button type="button" class="menu-item" @click="close()" hx-get={ "/dashboard/contacts/export/modal?id=" + strconv.FormatInt(c.Contact.ID, 10) } hx-target="#modal-root" hx-swap="innerHTML">Export</button>
 					<button type="button" class="menu-item text-red-600 hover:bg-red-600/10" @click="close()" hx-post={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/delete" } hx-target="#contacts-list" hx-swap="outerHTML" hx-confirm="Delete this contact? It is soft-deleted and purged after two days.">Delete</button>
 					<div class="my-1 border-t border-border"></div>
 					<div class="flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-muted-foreground/60">
@@ -428,16 +459,28 @@ templ ContactDetailPanel(d ContactDetail) {
 				<h2 class="truncate text-lg font-semibold">{ d.Name }</h2>
 				<p class="mt-0.5 truncate text-xs text-muted-foreground">{ d.UID }</p>
 			</div>
-			<button
-				type="button"
-				class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90"
-				hx-get={ "/dashboard/contacts/" + strconv.FormatInt(d.ID, 10) + "/edit" }
-				hx-target="#modal-root"
-				hx-swap="innerHTML"
-			>
-				@Icon("edit")
-				<span>Edit</span>
-			</button>
+			<div class="flex shrink-0 items-center gap-2">
+				<button
+					type="button"
+					class="btn-ghost inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm transition-colors"
+					hx-get={ "/dashboard/contacts/export/modal?id=" + strconv.FormatInt(d.ID, 10) }
+					hx-target="#modal-root"
+					hx-swap="innerHTML"
+				>
+					@Icon("download")
+					<span>Export</span>
+				</button>
+				<button
+					type="button"
+					class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90"
+					hx-get={ "/dashboard/contacts/" + strconv.FormatInt(d.ID, 10) + "/edit" }
+					hx-target="#modal-root"
+					hx-swap="innerHTML"
+				>
+					@Icon("edit")
+					<span>Edit</span>
+				</button>
+			</div>
 		</div>
 		if len(d.Lists) > 0 {
 			<section class="space-y-1">

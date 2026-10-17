@@ -78,6 +78,10 @@ func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) ht
 	mux.Handle("GET /dashboard/contacts/search", a.requireSession(http.HandlerFunc(a.searchContacts)))
 	mux.Handle("GET /dashboard/contacts/new", a.modal(a.contactAddModal))
 	mux.Handle("GET /dashboard/contacts/bulk-modal", a.modal(a.bulkListsModal))
+	mux.Handle("GET /dashboard/contacts/export/modal", a.modal(a.exportModal))
+	mux.Handle("GET /dashboard/contacts/import/modal", a.modal(a.importModal))
+	mux.Handle("GET /dashboard/contacts/export", a.requireSession(http.HandlerFunc(a.exportContacts)))
+	mux.Handle("POST /dashboard/contacts/import", http.MaxBytesHandler(a.mutate(http.HandlerFunc(a.importContacts)), 64<<20))
 	mux.Handle("GET /dashboard/contacts/{id}/view", a.modal(a.contactViewModal))
 	mux.Handle("GET /dashboard/contacts/{id}/edit", a.modal(a.contactEditModal))
 	mux.Handle("POST /dashboard/contacts", a.mutate(http.HandlerFunc(a.createContact)))
@@ -818,6 +822,7 @@ func (a *Admin) contactsData(r *http.Request, qry contactQuery) (pages.ContactsD
 		Page:         qry.page,
 		Per:          contactPer,
 		Total:        total,
+		Notice:       importNotice(r),
 	}
 	if qry.bookID != nil {
 		data.BookID = strconv.FormatInt(*qry.bookID, 10)
