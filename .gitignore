@@ -6,7 +6,7 @@ devenv.local.yaml
 # direnv
 .direnv
 
-STRATEGY.MD
+STRATEGY*
 
 # pre-commit
 .pre-commit-config.yaml

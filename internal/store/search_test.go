@@ -243,6 +243,43 @@ func searchMetaJSON(fn, org string, emails []string, telRaw, telNorm string) str
 	return string(b)
 }
 
+// TestSearchDefaultSortFamilyFirst proves the default order uses the
+// family-name-first sort key, not the display FN.
+func TestSearchDefaultSortFamilyFirst(t *testing.T) {
+	pool := resetPool(t)
+	ctx := context.Background()
+	user, err := store.NewUsers(pool).Signup(ctx, "sortuser", "sort@example.com", "Sort", "pw", 12)
+	if err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+
+	bob := insertSearchContact(t, ctx, pool, user.ID, "bob.vcf",
+		searchMetaJSONWithSort("Bob Adams", "Adams Bob"))
+	zoe := insertSearchContact(t, ctx, pool, user.ID, "zoe.vcf",
+		searchMetaJSONWithSort("Zoe Adams", "Adams Zoe"))
+	alice := insertSearchContact(t, ctx, pool, user.ID, "alice.vcf",
+		searchMetaJSONWithSort("Alice Brown", "Brown Alice"))
+
+	// FN order would be Alice Brown, Bob Adams, Zoe Adams.
+	got := searchIDs(t, ctx, pool, user.ID, store.SearchParams{Per: 50})
+	assertIDs(t, got, []int64{bob, zoe, alice})
+}
+
+func searchMetaJSONWithSort(fn, sortKey string) string {
+	b, err := json.Marshal(map[string]any{
+		"fn":       fn,
+		"n":        fn,
+		"sort":     sortKey,
+		"emails":   []string{},
+		"tels":     []map[string]string{},
+		"tel_norm": []string{},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
 func assertIDs(t *testing.T, got, want []int64) {
 	t.Helper()
 	if len(got) != len(want) {

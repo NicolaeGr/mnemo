@@ -558,6 +558,20 @@ window.popoverFor = (id) => ({
   },
 });
 
+// avatarColor returns a deterministic OKLCH colour for a name. Keep the hash and
+// ranges in sync with avatarColor in internal/web/pages/avatar.go.
+window.avatarColor = (name) => {
+  let h = 2166136261 >>> 0;
+  for (const ch of (name || "").trim().toLowerCase()) {
+    h ^= ch.codePointAt(0);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  const hue = h % 360;
+  const light = 0.56 + (Math.floor(h / 360) % 12) / 100;
+  const chroma = 0.12 + (Math.floor(h / 4320) % 7) / 100;
+  return `oklch(${light.toFixed(2)} ${chroma.toFixed(3)} ${hue})`;
+};
+
 window.contactEditor = (init) => {
   const row = () => ({ uid: nextContactUid(), key: "", type: "", value: "" });
   const addrRow = () => ({
@@ -632,6 +646,65 @@ window.contactEditor = (init) => {
         () => this.syncTitle(),
       );
       this.syncTitle();
+    },
+
+    // photo mirrors the server-rendered preview. photoDirty is false until the
+    // user picks or removes an image, so saving without a new upload leaves the
+    // stored PHOTO untouched.
+    photo: init.photo || "",
+    photoDirty: false,
+
+    avatarInitial() {
+      const given = Array.from((this.name.given || "").trim())[0];
+      if (given) return given.toUpperCase();
+      const full = Array.from(this.nameText().trim())[0];
+      return full ? full.toUpperCase() : "?";
+    },
+    avatarColor() {
+      return window.avatarColor(this.nameText() || this.name.given || "");
+    },
+
+    async onPhotoFile(event) {
+      const input = event.target;
+      const file = input.files && input.files[0];
+      input.value = "";
+      if (!file || !file.type.startsWith("image/")) return;
+      try {
+        let bitmap;
+        try {
+          bitmap = await createImageBitmap(file, {
+            imageOrientation: "from-image",
+          });
+        } catch (e) {
+          bitmap = await createImageBitmap(file);
+        }
+        const size = 256;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, size, size);
+        ctx.imageSmoothingQuality = "high";
+        const side = Math.min(bitmap.width, bitmap.height);
+        const sx = (bitmap.width - side) / 2;
+        const sy = (bitmap.height - side) / 2;
+        ctx.drawImage(bitmap, sx, sy, side, side, 0, 0, size, size);
+        if (bitmap.close) bitmap.close();
+        this.photo = canvas.toDataURL("image/jpeg", 0.85);
+        this.photoDirty = true;
+      } catch (e) {
+        window.dispatchEvent(
+          new CustomEvent("showToast", {
+            detail: { value: "Could not read that image" },
+          }),
+        );
+      }
+    },
+
+    clearPhoto() {
+      this.photo = "";
+      this.photoDirty = true;
     },
 
     kind(id) {

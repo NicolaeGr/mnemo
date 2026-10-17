@@ -125,13 +125,16 @@ func TestSearchMetaShape(t *testing.T) {
 	card.SetValue(vcard.FieldTelephone, "00 44 20 7946 0958")
 
 	meta := vcardmeta.SearchMeta(card)
-	for _, key := range []string{"fn", "uid", "n", "emails", "org", "tels", "tel_norm"} {
+	for _, key := range []string{"fn", "uid", "n", "sort", "emails", "org", "tels", "tel_norm"} {
 		if _, ok := meta[key]; !ok {
 			t.Fatalf("search_meta missing key %q", key)
 		}
 	}
-	if len(meta) != 7 {
-		t.Fatalf("search_meta has %d keys, want 7: %v", len(meta), meta)
+	if len(meta) != 8 {
+		t.Fatalf("search_meta has %d keys, want 8: %v", len(meta), meta)
+	}
+	if meta["sort"] != "Jane Doe" {
+		t.Fatalf("sort = %v, want Jane Doe", meta["sort"])
 	}
 	if meta["uid"] != uid {
 		t.Fatalf("uid = %v, want %v", meta["uid"], uid)

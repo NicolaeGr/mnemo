@@ -331,7 +331,7 @@ func EnsureUID(card vcard.Card, filename string) string {
 }
 
 // SearchMeta builds the search index from a card. The shape is fixed: fn, uid,
-// n, emails, org, tels, tel_norm. Adding a key here means also teaching
+// n, sort, emails, org, tels, tel_norm. Adding a key here means also teaching
 // search.go and the trigram indexes about it. Call EnsureUID first so uid is set.
 func SearchMeta(card vcard.Card) map[string]any {
 	rawTels := card.Values(vcard.FieldTelephone)
@@ -348,6 +348,7 @@ func SearchMeta(card vcard.Card) map[string]any {
 		"fn":       card.Value(vcard.FieldFormattedName),
 		"uid":      card.Value(vcard.FieldUID),
 		"n":        FormattedName(card.Name()),
+		"sort":     SortName(card),
 		"emails":   card.Values(vcard.FieldEmail),
 		"org":      card.Value(vcard.FieldOrganization),
 		"tels":     tels,

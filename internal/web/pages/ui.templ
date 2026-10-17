@@ -52,6 +52,21 @@ templ Icon(name string) {
 	}
 }
 
+// Avatar is a circular contact picture. Without a photo it renders an inline
+// SVG with the given name's first letter on a deterministic OKLCH background.
+templ Avatar(size, name, given, photo string) {
+	if photo != "" {
+		<span class={ "inline-flex shrink-0 overflow-hidden rounded-full bg-muted " + size }>
+			<img src={ photo } alt="" class="h-full w-full object-cover"/>
+		</span>
+	} else {
+		<svg class={ "shrink-0 rounded-full " + size } viewBox="0 0 40 40" role="img" aria-label={ name }>
+			<circle cx="20" cy="20" r="20" fill={ avatarColor(name) }></circle>
+			<text x="20" y="20" text-anchor="middle" dominant-baseline="central" fill="oklch(0.99 0 0)" font-size="18" font-weight="600">{ avatarInitial(given, name) }</text>
+		</svg>
+	}
+}
+
 // PageHeader is the title block every page opens with: a heading, an optional
 // subtitle (counts, hints), and an action slot the caller fills in.
 templ PageHeader(title, subtitle string, actions templ.Component) {

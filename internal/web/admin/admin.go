@@ -825,6 +825,7 @@ func (a *Admin) contactFormData(r *http.Request, id int64) (pages.ContactFormDat
 			d.FullName = ""
 		}
 		d.Prefix, d.Given, d.Additional, d.Family, d.Suffix = form.Name.Prefix, form.Name.Given, form.Name.Additional, form.Name.Family, form.Name.Suffix
+		d.Photo = vcardmeta.PhotoURL(card)
 		d.Fields = form.Fields
 		d.Addresses = form.Addresses
 		d.Action = "/dashboard/contacts/" + strconv.FormatInt(c.ID, 10) + "/edit"
@@ -946,8 +947,11 @@ func sentenceCase(s string) string {
 }
 
 func contactView(c store.Contact, tagged map[int64]bool) pages.ContactView {
-	name, tel, email, org := cardFields(c)
-	return pages.ContactView{Contact: c, Name: name, Tel: tel, Email: email, Org: org, Books: tagged}
+	name, given, tel, email, org, photo := cardFields(c)
+	return pages.ContactView{
+		Contact: c, Name: name, Given: given, Tel: tel,
+		Email: email, Org: org, Photo: photo, Books: tagged,
+	}
 }
 
 func (a *Admin) createContact(w http.ResponseWriter, r *http.Request) {
@@ -1173,6 +1177,8 @@ func (a *Admin) contactDetailData(r *http.Request, id int64) (pages.ContactDetai
 		if d.Name == "" {
 			d.Name = c.UID
 		}
+		d.Given = form.Name.Given
+		d.Photo = vcardmeta.PhotoURL(card)
 		d.Groups = detailGroups(form.Fields)
 		d.Addresses = form.Addresses
 		ids, err := s.ContactBookIDs(r.Context(), c.ID)
@@ -1426,16 +1432,20 @@ func paletteActions(q string) []pages.PaletteAction {
 
 // cardFields reads the display fields the edit form prefills; the name falls
 // back to the UID.
-func cardFields(c store.Contact) (name, tel, email, org string) {
+func cardFields(c store.Contact) (name, given, tel, email, org, photo string) {
 	card, err := vcard.NewDecoder(bytes.NewBufferString(c.VCardText)).Decode()
 	if err != nil {
-		return c.UID, "", "", ""
+		return c.UID, "", "", "", "", ""
 	}
 	name = card.Value(vcard.FieldFormattedName)
 	if name == "" {
 		name = c.UID
 	}
-	return name, card.Value(vcard.FieldTelephone), card.Value(vcard.FieldEmail), card.Value(vcard.FieldOrganization)
+	if n := card.Name(); n != nil {
+		given = n.GivenName
+	}
+	return name, given, card.Value(vcard.FieldTelephone), card.Value(vcard.FieldEmail),
+		card.Value(vcard.FieldOrganization), vcardmeta.PhotoURL(card)
 }
 
 // contactFormFromRequest reads the structured editor form.
@@ -1448,8 +1458,10 @@ func contactFormFromRequest(r *http.Request) contact.Form {
 			Family:     strings.TrimSpace(r.FormValue("n_family")),
 			Suffix:     strings.TrimSpace(r.FormValue("n_suffix")),
 		},
-		Fields:    contactFieldsFromForm(r),
-		Addresses: contactAddressesFromForm(r),
+		Fields:      contactFieldsFromForm(r),
+		Addresses:   contactAddressesFromForm(r),
+		Photo:       strings.TrimSpace(r.FormValue("photo_data")),
+		RemovePhoto: r.FormValue("photo_remove") == "1",
 	}
 }
 

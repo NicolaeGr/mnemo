@@ -139,6 +139,12 @@ type Form struct {
 	Name      Name      `json:"name"`
 	Fields    []Field   `json:"fields"`
 	Addresses []Address `json:"addresses"`
+
+	// Photo is a newly selected image as a data URL; empty means keep the base
+	// photo unchanged.
+	Photo string `json:"photo,omitempty"`
+	// RemovePhoto deletes the existing photo.
+	RemovePhoto bool `json:"-"`
 }
 
 // Empty reports whether the form carries no content, so the plane can reject a
@@ -157,6 +163,9 @@ func (f Form) Empty() bool {
 			return false
 		}
 	}
+	if strings.TrimSpace(f.Photo) != "" {
+		return false
+	}
 	return true
 }
 
@@ -171,6 +180,9 @@ func Build(base vcard.Card, f Form) (vcard.Card, error) {
 	}
 	if card.Value(vcard.FieldVersion) == "" {
 		card.SetValue(vcard.FieldVersion, "3.0")
+	}
+	if err := applyPhoto(card, f); err != nil {
+		return nil, err
 	}
 	var existingFN string
 	if base != nil {

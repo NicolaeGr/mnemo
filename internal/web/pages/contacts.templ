@@ -15,9 +15,11 @@ import (
 type ContactView struct {
 	Contact store.Contact
 	Name    string
+	Given   string
 	Tel     string
 	Email   string
 	Org     string
+	Photo   string
 	Books   map[int64]bool
 }
 
@@ -33,6 +35,7 @@ type ContactFormData struct {
 	Additional string
 	Family     string
 	Suffix     string
+	Photo      string
 	Fields     []contact.Field
 	Addresses  []contact.Address
 	Books      []store.Book // selectable books (active)
@@ -66,6 +69,7 @@ func contactEditorData(d ContactFormData) string {
 		"additional":   d.Additional,
 		"family":       d.Family,
 		"suffix":       d.Suffix,
+		"photo":        d.Photo,
 		"kinds":        contact.Kinds(),
 		"nameParts":    contact.NameParts(),
 		"addressParts": contact.AddressParts(),
@@ -382,13 +386,16 @@ templ ContactRow(c ContactView, books []store.Book) {
 			</div>
 		</td>
 		<td class="px-3 py-2">
-			<button
-				type="button"
-				class="text-left font-medium hover:underline"
-				hx-get={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/view" }
-				hx-target="#modal-root"
-				hx-swap="innerHTML"
-			>{ c.Name }</button>
+			<div class="flex min-w-0 items-center gap-2.5">
+				@Avatar("h-8 w-8", c.Name, c.Given, c.Photo)
+				<button
+					type="button"
+					class="min-w-0 truncate text-left font-medium hover:underline"
+					hx-get={ "/dashboard/contacts/" + strconv.FormatInt(c.Contact.ID, 10) + "/view" }
+					hx-target="#modal-root"
+					hx-swap="innerHTML"
+				>{ c.Name }</button>
+			</div>
 		</td>
 		<td class="hidden px-3 py-2 text-muted-foreground sm:table-cell">{ c.Tel }</td>
 		<td class="hidden px-3 py-2 xl:table-cell">
@@ -445,8 +452,10 @@ templ addContact() {
 type ContactDetail struct {
 	ID        int64
 	Name      string
+	Given     string
 	UID       string
 	Filename  string
+	Photo     string
 	Groups    []DetailGroup
 	Addresses []contact.Address
 	Lists     []string
@@ -472,9 +481,12 @@ func ContactIDs(d ContactsData) []int64 {
 templ ContactDetailPanel(d ContactDetail) {
 	<div class="space-y-5">
 		<div class="flex items-start justify-between gap-4">
-			<div class="min-w-0">
-				<h2 class="truncate text-lg font-semibold">{ d.Name }</h2>
-				<p class="mt-0.5 truncate text-xs text-muted-foreground">{ d.UID }</p>
+			<div class="flex min-w-0 items-center gap-3">
+				@Avatar("h-12 w-12", d.Name, d.Given, d.Photo)
+				<div class="min-w-0">
+					<h2 class="truncate text-lg font-semibold">{ d.Name }</h2>
+					<p class="mt-0.5 truncate text-xs text-muted-foreground">{ d.UID }</p>
+				</div>
 			</div>
 			<div class="flex shrink-0 items-center gap-2">
 				<button
@@ -600,6 +612,28 @@ templ ContactForm(d ContactFormData) {
 		x-data={ "contactEditor(" + contactEditorData(d) + ")" }
 	>
 		<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+		<section class="flex items-center gap-4">
+			<div class="h-16 w-16 shrink-0">
+				<template x-if="photo">
+					<img :src="photo" alt="" class="h-16 w-16 rounded-full object-cover"/>
+				</template>
+				<template x-if="!photo">
+					<svg class="h-16 w-16" viewBox="0 0 40 40" role="img" aria-label="Profile picture">
+						<circle cx="20" cy="20" r="20" :style="'fill: ' + avatarColor()"></circle>
+						<text x="20" y="20" text-anchor="middle" dominant-baseline="central" fill="oklch(0.99 0 0)" font-size="18" font-weight="600" x-text="avatarInitial()"></text>
+					</svg>
+				</template>
+			</div>
+			<div class="min-w-0">
+				<div class="flex flex-wrap items-center gap-2">
+					<button type="button" @click="$refs.photoInput.click()" class="inline-flex h-8 items-center rounded-md border border-border bg-background px-2.5 text-xs transition-colors hover:bg-muted">Upload photo</button>
+					<button type="button" x-show="photo" x-cloak @click="clearPhoto()" class="inline-flex h-8 items-center rounded-md px-2.5 text-xs text-red-600 transition-colors hover:bg-red-600/10">Remove</button>
+				</div>
+				<input x-ref="photoInput" type="file" accept="image/*" class="sr-only" @change="onPhotoFile($event)"/>
+				<input type="hidden" name="photo_data" :value="photoDirty ? photo : ''"/>
+				<input type="hidden" name="photo_remove" :value="photoDirty && !photo ? '1' : ''"/>
+			</div>
+		</section>
 		<section class="relative space-y-3 pb-8">
 			<h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Name</h3>
 			<div class="grid grid-cols-2 gap-3">

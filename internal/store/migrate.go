@@ -8,7 +8,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/emersion/go-vcard"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	vcardmeta "github.com/nicolaegr/mnemo/internal/vcard"
 )
 
 //go:embed migrations/*.sql
@@ -92,6 +95,47 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 			return err
 		}
 		if err := tx.Commit(ctx); err != nil {
+			return err
+		}
+	}
+	return backfillContactSort(ctx, pool)
+}
+
+// backfillContactSort fills search_meta.sort for pre-existing rows. It is
+// idempotent: rows that already carry the key are never selected again.
+func backfillContactSort(ctx context.Context, pool *pgxpool.Pool) error {
+	rows, err := pool.Query(ctx,
+		`SELECT id, vcard_text FROM contacts WHERE NOT (search_meta ? 'sort')`)
+	if err != nil {
+		return err
+	}
+	type pending struct {
+		id   int64
+		text string
+	}
+	var items []pending
+	for rows.Next() {
+		var p pending
+		if err := rows.Scan(&p.id, &p.text); err != nil {
+			rows.Close()
+			return err
+		}
+		items = append(items, p)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	for _, p := range items {
+		card, err := vcard.NewDecoder(strings.NewReader(p.text)).Decode()
+		if err != nil {
+			continue
+		}
+		if _, err := pool.Exec(ctx,
+			`UPDATE contacts SET search_meta = jsonb_set(search_meta, '{sort}', to_jsonb($2::text)) WHERE id = $1`,
+			p.id, vcardmeta.SortName(card)); err != nil {
 			return err
 		}
 	}

@@ -234,7 +234,7 @@ func sortExpr(key string) string {
 	case "created":
 		return "c.created_at"
 	default:
-		return contactNameAnchor
+		return contactSortAnchor
 	}
 }
 
@@ -246,3 +246,8 @@ func sortDir(dir string) string {
 }
 
 const contactNameAnchor = "lower(coalesce(c.search_meta->>'fn', ''))"
+
+// contactSortAnchor orders contacts family-name-first, falling back to the
+// display name (then the UID) for rows written before search_meta carried a
+// sort key.
+const contactSortAnchor = "lower(coalesce(nullif(c.search_meta->>'sort', ''), nullif(c.search_meta->>'fn', ''), c.uid))"

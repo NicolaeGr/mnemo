@@ -449,7 +449,7 @@ func (s ScopedStore) ListBookSummaries(ctx context.Context, previewLimit int) ([
 			SELECT cb.book_id,
 			       count(*) OVER (PARTITION BY cb.book_id) AS total,
 			       row_number() OVER (PARTITION BY cb.book_id
-			                          ORDER BY lower(coalesce(c.search_meta->>'fn', '')), c.filename) AS rn,
+			                          ORDER BY `+contactSortAnchor+`, c.filename) AS rn,
 			       coalesce(c.search_meta->>'fn', c.uid) AS fn,
 			       c.search_meta->'tels'->0->>'raw' AS tel,
 			       c.search_meta->'emails'->>0 AS email

@@ -62,7 +62,7 @@ func (s ScopedStore) ExportNames(ctx context.Context, bookID *int64, ids []int64
 		SELECT coalesce(nullif(c.search_meta->>'fn', ''), c.uid)
 		  FROM contacts c
 		 WHERE %s
-		 ORDER BY lower(coalesce(nullif(c.search_meta->>'fn', ''), c.uid)), c.filename
+		 ORDER BY `+contactSortAnchor+`, c.filename
 		 LIMIT $%d`, where, len(args))
 
 	rows, err := s.Tx.Query(ctx, query, args...)
