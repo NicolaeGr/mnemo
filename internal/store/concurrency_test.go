@@ -40,7 +40,7 @@ func TestConcurrentWritesCommitInIDOrder(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 
-	user, _, err := store.NewUsers(pool).Signup(ctx, "concuser", "conc@example.com", "Conc", "pw", 4)
+	user, err := store.NewUsers(pool).Signup(ctx, "concuser", "conc@example.com", "Conc", "pw", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}

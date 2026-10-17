@@ -306,8 +306,8 @@ func cardFromIn(base vcard.Card, in contactIn) (vcard.Card, error) {
 	return contact.Build(base, in.form())
 }
 
-// createContact stores a new card under a server-generated filename, tagging into
-// the system book unless tags are given.
+// createContact stores a new card under a server-generated filename, tagging it
+// into the given lists. Without tags the contact stays untagged.
 func (a *api) createContact(w http.ResponseWriter, r *http.Request) {
 	actor, err := a.actor(r)
 	if err != nil {
@@ -743,7 +743,7 @@ func validateSignup(body signupIn) error {
 	return nil
 }
 
-// signup creates an account with its system book. Anonymous.
+// signup creates an account with an empty settings row. Anonymous.
 func (a *api) signup(w http.ResponseWriter, r *http.Request) {
 	var body signupIn
 	if err := decodeJSON(r, &body); err != nil {
@@ -754,7 +754,7 @@ func (a *api) signup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	u, _, err := a.users.Signup(r.Context(), body.Username, body.Email, body.Name, body.Password, signupBcryptCost)
+	u, err := a.users.Signup(r.Context(), body.Username, body.Email, body.Name, body.Password, signupBcryptCost)
 	writeJSON(w, 201, meOut{u.ID, u.Username, u.Email, u.Name}, err)
 }
 

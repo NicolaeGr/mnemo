@@ -62,19 +62,16 @@ func scanContact(row pgx.Row) (Contact, error) {
 	return c, err
 }
 
-// ListContactsInBooks returns live contacts tagged in at least one of the
-// given books, ordered by filename. Empty book set means no contacts (everything is
-// invisible).
+// ListContactsInBooks returns live contacts that are either untagged or tagged
+// in at least one of the given books, ordered by filename.
 func (s ScopedStore) ListContactsInBooks(ctx context.Context, bookIDs []int64) ([]Contact, error) {
-	if len(bookIDs) == 0 {
-		return []Contact{}, nil
-	}
 	rows, err := s.Tx.Query(ctx, `
 		SELECT DISTINCT c.id, c.filename, c.vcard_text, c.uid, c.search_meta,
 		       c.etag, c.modified_by, c.deleted_at, c.created_at, c.updated_at
 		  FROM contacts c
-		  JOIN contact_books cb ON cb.contact_id = c.id
-		 WHERE c.user_id = $1 AND c.deleted_at IS NULL AND cb.book_id = ANY($2)
+		  LEFT JOIN contact_books cb ON cb.contact_id = c.id
+		 WHERE c.user_id = $1 AND c.deleted_at IS NULL
+		   AND (cb.book_id = ANY($2::bigint[]) OR cb.book_id IS NULL)
 		 ORDER BY c.filename`, s.Actor.UserID, bookIDs)
 	if err != nil {
 		return nil, err
@@ -100,18 +97,16 @@ type ObjectRef struct {
 	UpdatedAt time.Time
 }
 
-// ListVisibleObjectRefs returns live contacts tagged in at least one of the
-// given books, as {filename, etag, updated_at} only. Empty book set means
-// nothing is visible.
+// ListVisibleObjectRefs returns live contacts that are either untagged or
+// tagged in at least one of the given books, as {filename, etag, updated_at}
+// only.
 func (s ScopedStore) ListVisibleObjectRefs(ctx context.Context, bookIDs []int64) ([]ObjectRef, error) {
-	if len(bookIDs) == 0 {
-		return []ObjectRef{}, nil
-	}
 	rows, err := s.Tx.Query(ctx, `
 		SELECT DISTINCT c.filename, c.etag, c.updated_at
 		  FROM contacts c
-		  JOIN contact_books cb ON cb.contact_id = c.id
-		 WHERE c.user_id = $1 AND c.deleted_at IS NULL AND cb.book_id = ANY($2)
+		  LEFT JOIN contact_books cb ON cb.contact_id = c.id
+		 WHERE c.user_id = $1 AND c.deleted_at IS NULL
+		   AND (cb.book_id = ANY($2::bigint[]) OR cb.book_id IS NULL)
 		 ORDER BY c.filename`, s.Actor.UserID, bookIDs)
 	if err != nil {
 		return nil, err
@@ -172,11 +167,11 @@ func (s ScopedStore) LiveContactByID(ctx context.Context, id int64) (Contact, er
 		id, s.Actor.UserID))
 }
 
-// PutContact handles preconditions, live-UID dedupe, default system-book
-// tagging on create, and a contact_changes 'put' row, then makes the card's
-// CATEGORIES follow its books and returns the resulting etag. Failure paths
-// return ErrPrecondition (412), ErrNotFound (404), ErrUIDConflict or
-// ErrFilenameRetired (409). Caller must hold the sync lock.
+// PutContact handles preconditions, live-UID dedupe, create without tags, and a
+// contact_changes 'put' row, then makes the card's CATEGORIES follow its books
+// and returns the resulting etag. Failure paths return ErrPrecondition (412),
+// ErrNotFound (404), ErrUIDConflict or ErrFilenameRetired (409). Caller must
+// hold the sync lock.
 func (s ScopedStore) PutContact(ctx context.Context, p PutContactParams, cond Precondition) (PutResult, error) {
 	res, err := s.putContact(ctx, p, cond)
 	if err != nil {
@@ -309,9 +304,6 @@ func (s ScopedStore) insertContact(ctx context.Context, p PutContactParams, text
 		s.Actor.UserID, p.Filename, text, p.UID, p.SearchMeta, etag,
 	).Scan(&id)
 	if err == nil {
-		if err := s.tagSystemBook(ctx, id); err != nil {
-			return false, err
-		}
 		return true, nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -323,25 +315,12 @@ func (s ScopedStore) insertContact(ctx context.Context, p PutContactParams, text
 	return false, err
 }
 
-func (s ScopedStore) tagSystemBook(ctx context.Context, contactID int64) error {
-	var bookID int64
-	if err := s.Tx.QueryRow(ctx, `
-		SELECT id FROM books WHERE owner_user_id = $1 AND is_system`,
-		s.Actor.UserID).Scan(&bookID); err != nil {
-		return err
-	}
-	_, err := s.Tx.Exec(ctx, `
-		INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)
-		ON CONFLICT DO NOTHING`, contactID, bookID)
-	return err
-}
-
 // SaveContact writes a card and applies its tag set, returning the stored row.
 // It is the single write sequence the REST and admin planes share, so the two
-// cannot drift. tags == nil leaves tagging alone (a create keeps its system-book
-// default, an update keeps existing tags); tags != nil sets the exact book set,
-// repaired to the system book when empty (I1). Either way the card's CATEGORIES
-// ends up matching its books. Caller holds LockSync.
+// cannot drift. tags == nil leaves tagging alone (a create stays untagged, an
+// update keeps existing tags); tags != nil sets the exact book set, which may be
+// empty. Either way the card's CATEGORIES ends up matching its books. Caller
+// holds LockSync.
 func (s ScopedStore) SaveContact(ctx context.Context, p PutContactParams, cond Precondition, tags []int64) (Contact, error) {
 	if _, err := s.PutContact(ctx, p, cond); err != nil {
 		return Contact{}, err

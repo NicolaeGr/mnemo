@@ -20,20 +20,18 @@ type Book struct {
 	Description *string
 	SortOrder   int
 	IsActive    bool
-	IsSystem    bool
 	SyncedTiers []string
 	CreatedAt   time.Time
 }
 
-// Signup creates a user + settings + system book in one tx.
-func (u *Users) Signup(ctx context.Context, username, email, name, password string, bcryptCost int) (User, Book, error) {
+// Signup creates a user and an empty settings row in one tx.
+func (u *Users) Signup(ctx context.Context, username, email, name, password string, bcryptCost int) (User, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
-		return User{}, Book{}, err
+		return User{}, err
 	}
 
 	var user User
-	var book Book
 	err = pgx.BeginFunc(ctx, u.pool, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `
 			INSERT INTO users (username, email, name, password_hash)
@@ -45,26 +43,13 @@ func (u *Users) Signup(ctx context.Context, username, email, name, password stri
 			return mapSignupError(err)
 		}
 
-		err = tx.QueryRow(ctx, `
-			INSERT INTO books (owner_user_id, slug, display_name, sort_order, is_system)
-			VALUES ($1, 'all', 'Default Contacts', 0, true)
-			RETURNING id, owner_user_id, slug, display_name, description, sort_order,
-			          is_active, is_system, synced_tiers::text[], created_at`,
-			user.ID,
-		).Scan(&book.ID, &book.OwnerUserID, &book.Slug, &book.DisplayName, &book.Description,
-			&book.SortOrder, &book.IsActive, &book.IsSystem, &book.SyncedTiers, &book.CreatedAt)
-		if err != nil {
-			return err
-		}
-
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO user_settings (user_id, default_book_id)
-			VALUES ($1, $2)`, user.ID, book.ID); err != nil {
+			INSERT INTO user_settings (user_id) VALUES ($1)`, user.ID); err != nil {
 			return err
 		}
 		return nil
 	})
-	return user, book, err
+	return user, err
 }
 
 func mapSignupError(err error) error {
@@ -116,7 +101,7 @@ func (s ScopedStore) ListBooks(ctx context.Context) ([]Book, error) {
 func (s ScopedStore) GetBook(ctx context.Context, bookID int64) (Book, error) {
 	return scanBook(s.Tx.QueryRow(ctx, `
 		SELECT id, owner_user_id, slug, display_name, description, sort_order,
-		       is_active, is_system, synced_tiers::text[], created_at
+		       is_active, synced_tiers::text[], created_at
 		  FROM books
 		 WHERE owner_user_id = $1 AND id = $2`, s.Actor.UserID, bookID))
 }
@@ -124,7 +109,7 @@ func (s ScopedStore) GetBook(ctx context.Context, bookID int64) (Book, error) {
 func (s ScopedStore) queryBooks(ctx context.Context, where string) ([]Book, error) {
 	rows, err := s.Tx.Query(ctx, `
 		SELECT id, owner_user_id, slug, display_name, description, sort_order,
-		       is_active, is_system, synced_tiers::text[], created_at
+		       is_active, synced_tiers::text[], created_at
 		  FROM books
 		 `+where+`
 		 ORDER BY sort_order, slug`, s.Actor.UserID)
@@ -153,10 +138,10 @@ func (s ScopedStore) CreateBook(ctx context.Context, slug, displayName string, d
 		INSERT INTO books (owner_user_id, slug, display_name, description, sort_order)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, owner_user_id, slug, display_name, description, sort_order,
-		          is_active, is_system, synced_tiers::text[], created_at`,
+		          is_active, synced_tiers::text[], created_at`,
 		s.Actor.UserID, slug, displayName, description, sortOrder,
 	).Scan(&b.ID, &b.OwnerUserID, &b.Slug, &b.DisplayName, &b.Description,
-		&b.SortOrder, &b.IsActive, &b.IsSystem, &b.SyncedTiers, &b.CreatedAt)
+		&b.SortOrder, &b.IsActive, &b.SyncedTiers, &b.CreatedAt)
 	if isUniqueViolation(err) {
 		return Book{}, model.ErrConflict
 	}
@@ -165,21 +150,10 @@ func (s ScopedStore) CreateBook(ctx context.Context, slug, displayName string, d
 
 // SetBookActive activates/deactivates a book. Flipping is_active changes the
 // union every principal syncs, so it bumps them all; no-op if the value is
-// unchanged. The system book is every contact's I1 fallback, so hiding it would
-// strand contacts unrecoverably; deactivating it is a conflict. Caller holds
-// LockSync.
+// unchanged. Caller holds LockSync.
 func (s ScopedStore) SetBookActive(ctx context.Context, bookID int64, active bool) error {
-	var isSystem bool
-	if err := s.Tx.QueryRow(ctx, `
-		SELECT is_system FROM books WHERE owner_user_id = $1 AND id = $2`,
-		s.Actor.UserID, bookID).Scan(&isSystem); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return model.ErrNotFound
-		}
+	if err := s.requireOwnedBook(ctx, bookID); err != nil {
 		return err
-	}
-	if isSystem && !active {
-		return model.ErrConflict
 	}
 	tag, err := s.Tx.Exec(ctx, `
 		UPDATE books SET is_active = $3
@@ -195,21 +169,11 @@ func (s ScopedStore) SetBookActive(ctx context.Context, bookID int64, active boo
 }
 
 // SetBookTiers replaces a book's synced_tiers; a real change bumps all of the
-// actor's principals. The system book's tiers are fixed (it is every device's
-// fallback), and a set must be non-empty with archived kept exclusive. Caller
-// holds LockSync.
+// actor's principals. A set must be non-empty with archived kept exclusive.
+// Caller holds LockSync.
 func (s ScopedStore) SetBookTiers(ctx context.Context, bookID int64, tiers []string) error {
-	var isSystem bool
-	if err := s.Tx.QueryRow(ctx, `
-		SELECT is_system FROM books WHERE owner_user_id = $1 AND id = $2`,
-		s.Actor.UserID, bookID).Scan(&isSystem); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return model.ErrNotFound
-		}
+	if err := s.requireOwnedBook(ctx, bookID); err != nil {
 		return err
-	}
-	if isSystem {
-		return model.ErrConflict
 	}
 	if err := validTiers(tiers); err != nil {
 		return err
@@ -249,21 +213,12 @@ func validTiers(tiers []string) error {
 	return nil
 }
 
-// DeleteBook removes a non-system book, folding its tags onto the system book
-// first so every contact keeps a tag, then bumps all principals. System-book
-// deletion is ErrConflict. Caller holds LockSync.
+// DeleteBook removes a book. Contacts tagged only in it become untagged, and
+// their CATEGORIES is rewritten. Then it bumps all principals. Caller holds
+// LockSync.
 func (s ScopedStore) DeleteBook(ctx context.Context, bookID int64) error {
-	var isSystem bool
-	if err := s.Tx.QueryRow(ctx, `
-		SELECT is_system FROM books WHERE owner_user_id = $1 AND id = $2`,
-		s.Actor.UserID, bookID).Scan(&isSystem); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return model.ErrNotFound
-		}
+	if err := s.requireOwnedBook(ctx, bookID); err != nil {
 		return err
-	}
-	if isSystem {
-		return model.ErrConflict
 	}
 
 	files, err := s.filenamesInBook(ctx, bookID)
@@ -271,18 +226,6 @@ func (s ScopedStore) DeleteBook(ctx context.Context, bookID int64) error {
 		return err
 	}
 
-	var systemID int64
-	if err := s.Tx.QueryRow(ctx,
-		`SELECT id FROM books WHERE owner_user_id = $1 AND is_system`, s.Actor.UserID,
-	).Scan(&systemID); err != nil {
-		return err
-	}
-	if _, err := s.Tx.Exec(ctx, `
-		INSERT INTO contact_books (contact_id, book_id)
-		SELECT contact_id, $1 FROM contact_books WHERE book_id = $2
-		ON CONFLICT DO NOTHING`, systemID, bookID); err != nil {
-		return err
-	}
 	if _, err := s.Tx.Exec(ctx, `DELETE FROM contact_books WHERE book_id = $1`, bookID); err != nil {
 		return err
 	}
@@ -466,7 +409,7 @@ func deref(s *string) string {
 func scanBook(row pgx.Row) (Book, error) {
 	var b Book
 	err := row.Scan(&b.ID, &b.OwnerUserID, &b.Slug, &b.DisplayName, &b.Description,
-		&b.SortOrder, &b.IsActive, &b.IsSystem, &b.SyncedTiers, &b.CreatedAt)
+		&b.SortOrder, &b.IsActive, &b.SyncedTiers, &b.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Book{}, model.ErrNotFound
 	}

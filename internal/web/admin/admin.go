@@ -381,8 +381,7 @@ func (a *Admin) editBook(w http.ResponseWriter, r *http.Request) {
 		if err := store.LockSync(r.Context(), s.Tx, a.actor(r).UserID); err != nil {
 			return err
 		}
-		b, err := s.GetBook(r.Context(), id)
-		if err != nil {
+		if _, err := s.GetBook(r.Context(), id); err != nil {
 			return err
 		}
 		if err := s.RenameBook(r.Context(), id, r.FormValue("display_name")); err != nil {
@@ -390,10 +389,6 @@ func (a *Admin) editBook(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := s.SetBookDescription(r.Context(), id, &desc); err != nil {
 			return err
-		}
-		if b.IsSystem {
-			// The system book's tiers and active flag are fixed.
-			return nil
 		}
 		if err := s.SetBookTiers(r.Context(), id, tiers); err != nil {
 			return err
@@ -722,23 +717,18 @@ func (a *Admin) contactEditModal(r *http.Request) (string, templ.Component) {
 	return title, pages.ContactForm(d)
 }
 
-// contactFormData builds the editor seed. The book picker excludes the default
-// book, which is the fallback for untagged contacts.
+// contactFormData builds the editor seed. Every active book is selectable;
+// leaving all of them unchecked leaves the contact untagged.
 func (a *Admin) contactFormData(r *http.Request, id int64) (pages.ContactFormData, error) {
 	actor := a.actor(r)
-	defaultID, err := a.users.DefaultBook(r.Context(), actor.UserID)
-	if err != nil {
-		return pages.ContactFormData{}, err
-	}
 	var d pages.ContactFormData
 	d.TitleBase = "Add contact"
-	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
+	err := store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
 		all, err := s.ListBooks(r.Context())
 		if err != nil {
 			return err
 		}
-		fallback := resolveFallback(all, defaultID)
-		d.Books = choosableBooks(all, fallback.ID)
+		d.Books = activeBooks(all)
 		d.Selected = []int64{}
 		if id == 0 {
 			d.Action = "/dashboard/contacts"
@@ -752,11 +742,7 @@ func (a *Admin) contactFormData(r *http.Request, id int64) (pages.ContactFormDat
 		if err != nil {
 			return err
 		}
-		for _, b := range ids {
-			if b != fallback.ID {
-				d.Selected = append(d.Selected, b)
-			}
-		}
+		d.Selected = ids
 		card, _ := vcard.NewDecoder(bytes.NewBufferString(c.VCardText)).Decode()
 		form := contact.Parse(card)
 		d.TitleBase = "Edit contact"
@@ -1190,62 +1176,7 @@ func (a *Admin) desiredBooks(r *http.Request) ([]int64, error) {
 	for id := range bookSet(r) {
 		ids = append(ids, id)
 	}
-	if len(ids) == 0 {
-		fb, err := a.fallbackBookID(r)
-		if err != nil {
-			return nil, err
-		}
-		return []int64{fb}, nil
-	}
 	return ids, nil
-}
-
-// fallbackBookID is the default book, or the system book when no default is set.
-func (a *Admin) fallbackBookID(r *http.Request) (int64, error) {
-	actor := a.actor(r)
-	defaultID, err := a.users.DefaultBook(r.Context(), actor.UserID)
-	if err != nil {
-		return 0, err
-	}
-	var id int64
-	err = store.WithTx(r.Context(), a.pool, actor, func(s store.ScopedStore) error {
-		books, err := s.ListBooks(r.Context())
-		if err != nil {
-			return err
-		}
-		id = resolveFallback(books, defaultID).ID
-		return nil
-	})
-	return id, err
-}
-
-func resolveFallback(books []store.Book, defaultID *int64) store.Book {
-	if defaultID != nil {
-		for _, b := range books {
-			if b.ID == *defaultID && b.IsActive {
-				return b
-			}
-		}
-	}
-	for _, b := range books {
-		if b.IsSystem {
-			return b
-		}
-	}
-	if len(books) > 0 {
-		return books[0]
-	}
-	return store.Book{}
-}
-
-func choosableBooks(books []store.Book, fallbackID int64) []store.Book {
-	out := make([]store.Book, 0, len(books))
-	for _, b := range books {
-		if b.IsActive && b.ID != fallbackID {
-			out = append(out, b)
-		}
-	}
-	return out
 }
 
 // --- settings ---

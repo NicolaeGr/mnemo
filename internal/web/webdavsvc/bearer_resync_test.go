@@ -23,7 +23,7 @@ func TestTierFlipChangesDeviceViewAndCtag(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	u, _, err := users.Signup(ctx, testUsername, testEmail, "Nick", testPassword, 4)
+	u, err := users.Signup(ctx, testUsername, testEmail, "Nick", testPassword, 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}

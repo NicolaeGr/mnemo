@@ -15,7 +15,7 @@ func TestBookOps(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 
-	user, system, err := store.NewUsers(pool).Signup(ctx, "bookuser", "book@example.com", "Book", "pw", 12)
+	user, err := store.NewUsers(pool).Signup(ctx, "bookuser", "book@example.com", "Book", "pw", 12)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
@@ -31,17 +31,9 @@ func TestBookOps(t *testing.T) {
 		t.Fatalf("create bumped epoch: %d != %d", got, e)
 	}
 
-	// Duplicate slug and system-book deletion are both conflicts.
+	// Duplicate slug is a conflict.
 	if _, err := createBook(t, ctx, pool, user.ID, "work", "Dup"); !errors.Is(err, model.ErrConflict) {
 		t.Fatalf("dup slug err = %v, want ErrConflict", err)
-	}
-	if err := deleteBook(t, ctx, pool, user.ID, system.ID); !errors.Is(err, model.ErrConflict) {
-		t.Fatalf("system delete err = %v, want ErrConflict", err)
-	}
-
-	// The system book is the I1 fallback and can't be hidden either.
-	if err := setBookActive(t, ctx, pool, user.ID, system.ID, false); !errors.Is(err, model.ErrConflict) {
-		t.Fatalf("system deactivate err = %v, want ErrConflict", err)
 	}
 
 	// Deactivating and changing tiers flip what principals sync, so each bumps.
@@ -74,8 +66,8 @@ func TestBookOps(t *testing.T) {
 		t.Fatalf("no-op tier set bumped: %d != %d", got, e)
 	}
 
-	// Deleting a book folds its tags onto the system book (I1) then bumps.
-	contact := insertContact(t, ctx, pool, user.ID, system.ID)
+	// Deleting a book untags its contacts then bumps.
+	contact := insertContact(t, ctx, pool, user.ID)
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)`, contact, work.ID); err != nil {
 		t.Fatalf("tag work: %v", err)
@@ -87,7 +79,7 @@ func TestBookOps(t *testing.T) {
 	if got := epochOf(t, ctx, pool, prim); got <= e {
 		t.Fatalf("delete did not bump: %d <= %d", got, e)
 	}
-	assertTags(t, ctx, pool, contact, system.ID)
+	assertTags(t, ctx, pool, contact)
 	var gone bool
 	if err := pool.QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM books WHERE id = $1)`, work.ID).Scan(&gone); err != nil {
@@ -107,7 +99,7 @@ func TestBookTierValidation(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 
-	user, system, err := store.NewUsers(pool).Signup(ctx, "tieruser", "tier@example.com", "T", "pw", 4)
+	user, err := store.NewUsers(pool).Signup(ctx, "tieruser", "tier@example.com", "T", "pw", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
@@ -124,9 +116,6 @@ func TestBookTierValidation(t *testing.T) {
 	}
 	if err := setBookTiers(t, ctx, pool, user.ID, work.ID, []string{"archived"}); err != nil {
 		t.Fatalf("archived-only tiers err = %v, want nil", err)
-	}
-	if err := setBookTiers(t, ctx, pool, user.ID, system.ID, []string{"primary"}); !errors.Is(err, model.ErrConflict) {
-		t.Fatalf("system tiers err = %v, want ErrConflict", err)
 	}
 }
 

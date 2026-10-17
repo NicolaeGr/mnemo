@@ -60,7 +60,7 @@ func (b *backend) GetAddressObject(ctx context.Context, p string, _ *carddav.Add
 		if err != nil {
 			return err
 		}
-		if !anyVisible(bookIDs, visible) { // a card with no visible book is not found
+		if !contactVisible(bookIDs, visible) { // an invisible card is not found
 			return model.ErrNotFound
 		}
 		card, err := vcard.NewDecoder(bytes.NewBufferString(c.VCardText)).Decode()
@@ -283,7 +283,7 @@ func (b *backend) ensureVisible(ctx context.Context, s store.ScopedStore, filena
 	if err != nil {
 		return err
 	}
-	if !anyVisible(books, visible) {
+	if !contactVisible(books, visible) {
 		return model.ErrNotFound
 	}
 	return nil
@@ -328,4 +328,10 @@ func anyVisible(bookIDs []int64, visible map[int64]bool) bool {
 		}
 	}
 	return false
+}
+
+// contactVisible reports whether a card is visible: untagged cards always are,
+// and tagged cards are visible through any book the caller can see.
+func contactVisible(bookIDs []int64, visible map[int64]bool) bool {
+	return len(bookIDs) == 0 || anyVisible(bookIDs, visible)
 }

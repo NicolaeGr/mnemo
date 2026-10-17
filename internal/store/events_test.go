@@ -13,7 +13,7 @@ func TestForceResyncEvent(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 
-	user, _, err := store.NewUsers(pool).Signup(ctx, "eventuser", "event@example.com", "Event", "pw", 4)
+	user, err := store.NewUsers(pool).Signup(ctx, "eventuser", "event@example.com", "Event", "pw", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestClaimEventsAreExclusive(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 
-	user, _, err := store.NewUsers(pool).Signup(ctx, "leasuser", "lease@example.com", "Lease", "pw", 4)
+	user, err := store.NewUsers(pool).Signup(ctx, "leasuser", "lease@example.com", "Lease", "pw", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestRecordFailureDeadLetters(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 
-	user, _, err := store.NewUsers(pool).Signup(ctx, "evuser", "ev@example.com", "Ev", "pw", 4)
+	user, err := store.NewUsers(pool).Signup(ctx, "evuser", "ev@example.com", "Ev", "pw", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}

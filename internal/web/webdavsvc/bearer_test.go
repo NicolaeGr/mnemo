@@ -14,7 +14,7 @@ func TestBearerPrincipalAuth(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	if _, _, err := users.Signup(ctx, testUsername, testEmail, "Nick", testPassword, 4); err != nil {
+	if _, err := users.Signup(ctx, testUsername, testEmail, "Nick", testPassword, 4); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 	u, err := users.ByLogin(ctx, testUsername)

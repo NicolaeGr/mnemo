@@ -21,7 +21,7 @@ func TestAppServesCarddavAtRoot(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	if _, _, err := users.Signup(ctx, testUsername, testEmail, "Nick", testPassword, bcrypt.DefaultCost); err != nil {
+	if _, err := users.Signup(ctx, testUsername, testEmail, "Nick", testPassword, bcrypt.DefaultCost); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 

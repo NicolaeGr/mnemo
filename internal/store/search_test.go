@@ -16,13 +16,14 @@ import (
 func TestSearchSpecifiers(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
-	user, system, err := store.NewUsers(pool).Signup(ctx, "searchuser", "search@example.com", "Search", "pw", 12)
+	user, err := store.NewUsers(pool).Signup(ctx, "searchuser", "search@example.com", "Search", "pw", 12)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 
+	base := insertBook(t, ctx, pool, user.ID, "base", "{primary}")
 	a := insertSearchContact(t, ctx, pool, user.ID, "a.vcf",
-		searchMetaJSON("Alice Adams", "Acme", []string{"alice@acme.com"}, "123", "123"), system.ID)
+		searchMetaJSON("Alice Adams", "Acme", []string{"alice@acme.com"}, "123", "123"), base.ID)
 	b := insertSearchContact(t, ctx, pool, user.ID, "b.vcf",
 		searchMetaJSON("Bob Brown", "Beta", nil, "", ""))
 	c := insertSearchContact(t, ctx, pool, user.ID, "c.vcf",
@@ -57,7 +58,7 @@ func TestSearchSpecifiers(t *testing.T) {
 func TestSearchRanking(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
-	user, _, err := store.NewUsers(pool).Signup(ctx, "rankuser", "rank@example.com", "Rank", "pw", 12)
+	user, err := store.NewUsers(pool).Signup(ctx, "rankuser", "rank@example.com", "Rank", "pw", 12)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}

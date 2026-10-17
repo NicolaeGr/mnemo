@@ -19,7 +19,7 @@ func TestTokenAsBasicPassword(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	u, _, err := users.Signup(ctx, "authuser", "auth@example.com", "Auth", "pw", 4)
+	u, err := users.Signup(ctx, "authuser", "auth@example.com", "Auth", "pw", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}

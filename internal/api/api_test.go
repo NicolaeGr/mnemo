@@ -21,7 +21,7 @@ func TestAPI(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	user, system, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4)
+	user, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
@@ -58,10 +58,6 @@ func TestAPI(t *testing.T) {
 		VALUES ($1, 'c.vcf', 'c', 'BEGIN:VCARD\r\nEND:VCARD', '{}', 'e') RETURNING id`,
 		user.ID).Scan(&cid); err != nil {
 		t.Fatalf("insert contact: %v", err)
-	}
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)`, cid, system.ID); err != nil {
-		t.Fatalf("tag system: %v", err)
 	}
 
 	body := `{"add":[` + strconv.FormatInt(bookOut.ID, 10) + `]}`
@@ -163,7 +159,7 @@ func TestContactCreateUpdate(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	if _, _, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4); err != nil {
+	if _, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 	ts := httptest.NewServer(api.New(users, pool))
@@ -209,7 +205,7 @@ func TestContactStructuredInput(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	user, system, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4)
+	user, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
@@ -226,8 +222,7 @@ func TestContactStructuredInput(t *testing.T) {
 	}
 
 	// The structured shape mirrors the admin form: name parts, property rows,
-	// exploded addresses, and tags. Tags are the exact set, so tagging into work
-	// moves the card out of the system book.
+	// exploded addresses, and tags. Tags are the exact set.
 	in, _ := json.Marshal(map[string]any{
 		"name":      map[string]any{"given": "Alice", "family": "Smith"},
 		"fields":    []map[string]any{{"kind": "email", "type": "work", "value": "alice@example.com"}},
@@ -259,16 +254,14 @@ func TestContactStructuredInput(t *testing.T) {
 		t.Fatalf("structured echo wrong: %+v", out)
 	}
 
-	var inWork, inSystem bool
-	if err := pool.QueryRow(ctx, `
-		SELECT
-		  EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $2),
-		  EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $3)`,
-		out.ID, bookID, system.ID).Scan(&inWork, &inSystem); err != nil {
+	var inWork bool
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $2)`,
+		out.ID, bookID).Scan(&inWork); err != nil {
 		t.Fatalf("read tags: %v", err)
 	}
-	if !inWork || inSystem {
-		t.Fatalf("tags = work:%v system:%v, want work only", inWork, inSystem)
+	if !inWork {
+		t.Fatalf("tags = work:%v, want work only", inWork)
 	}
 
 	// A structured PATCH replaces the editable fields over the stored identity,
@@ -297,7 +290,7 @@ func TestAccountEndpoints(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	if _, _, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4); err != nil {
+	if _, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 	ts := httptest.NewServer(api.New(users, pool))
@@ -352,7 +345,7 @@ func TestBookDescriptionAndSearchFilter(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	if _, _, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4); err != nil {
+	if _, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 	ts := httptest.NewServer(api.New(users, pool))

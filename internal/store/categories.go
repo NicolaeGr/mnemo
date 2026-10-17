@@ -12,10 +12,10 @@ import (
 )
 
 // applyCategories rewrites a contact's CATEGORIES to the display names of its
-// non-system books and returns the resulting etag. A change rewrites the body and
-// etag and appends a 'put'. When clientCats is set, the caller's CATEGORIES is
-// logged before it is overwritten, so a client clearing its categories shows up as
-// an empty list. Caller holds LockSync.
+// books and returns the resulting etag. A change rewrites the body and etag and
+// appends a 'put'. When clientCats is set, the caller's CATEGORIES is logged
+// before it is overwritten, so a client clearing its categories shows up as an
+// empty list. Caller holds LockSync.
 func (s ScopedStore) applyCategories(ctx context.Context, filename string, clientCats bool) (string, error) {
 	var contactID int64
 	var text, etag string
@@ -54,14 +54,14 @@ func (s ScopedStore) applyCategories(ctx context.Context, filename string, clien
 	return newETag, nil
 }
 
-// bookCategoryNames returns the display names of the contact's non-system books,
-// ordered by slug so a book reorder never changes a stored body.
+// bookCategoryNames returns the display names of the contact's books, ordered by
+// slug so a book reorder never changes a stored body.
 func (s ScopedStore) bookCategoryNames(ctx context.Context, contactID int64) ([]string, error) {
 	rows, err := s.Tx.Query(ctx, `
 		SELECT b.display_name
 		  FROM contact_books cb
 		  JOIN books b ON b.id = cb.book_id
-		 WHERE cb.contact_id = $1 AND b.owner_user_id = $2 AND NOT b.is_system
+		 WHERE cb.contact_id = $1 AND b.owner_user_id = $2
 		 ORDER BY b.slug`, contactID, s.Actor.UserID)
 	if err != nil {
 		return nil, err

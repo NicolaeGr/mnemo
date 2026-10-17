@@ -24,7 +24,7 @@ func TestAdminLoginAndSession(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	if _, _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4); err != nil {
+	if _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
@@ -76,8 +76,7 @@ func TestAdminBooks(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	_, system, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
-	if err != nil {
+	if _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
@@ -87,9 +86,6 @@ func TestAdminBooks(t *testing.T) {
 	// The slug checker reports availability before the unique constraint fires.
 	if rec := do(h, "GET", "/dashboard/books/slug?slug=work", nil, cookie); !strings.Contains(rec.Body.String(), `"available":true`) {
 		t.Fatalf("free slug check = %d: %s", rec.Code, rec.Body.String())
-	}
-	if rec := do(h, "GET", "/dashboard/books/slug?slug=all", nil, cookie); !strings.Contains(rec.Body.String(), `"available":false`) {
-		t.Fatalf("system slug should be taken: %s", rec.Body.String())
 	}
 
 	rec := do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}, "tiers": {"primary", "secondary"}}, cookie)
@@ -109,22 +105,6 @@ func TestAdminBooks(t *testing.T) {
 		url.Values{"csrf": {csrf}, "display_name": {"Work"}, "tiers": {"primary", "secondary"}, "active": {"false"}}, cookie)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "inactive") {
 		t.Fatalf("deactivate = %d, body missing inactive: %s", rec.Code, rec.Body.String())
-	}
-
-	// The system book's tiers and active flag are fixed, so editing them is ignored.
-	rec = do(h, "POST", "/dashboard/books/"+strconv.FormatInt(system.ID, 10)+"/edit",
-		url.Values{"csrf": {csrf}, "display_name": {"Default Contacts"}, "tiers": {"archived"}, "active": {"false"}}, cookie)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("system edit = %d, want 200", rec.Code)
-	}
-	var sysActive bool
-	var sysTiers string
-	if err := pool.QueryRow(ctx,
-		`SELECT is_active, array_to_string(synced_tiers, ',') FROM books WHERE id = $1`, system.ID).Scan(&sysActive, &sysTiers); err != nil {
-		t.Fatalf("read system book: %v", err)
-	}
-	if !sysActive || !strings.Contains(sysTiers, "primary") {
-		t.Fatalf("system book changed: active=%v tiers=%q", sysActive, sysTiers)
 	}
 
 	rec = do(h, "POST", "/dashboard/books/"+strconv.FormatInt(workID, 10)+"/delete",
@@ -147,7 +127,7 @@ func TestAdminDevices(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	if _, _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4); err != nil {
+	if _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
@@ -207,7 +187,7 @@ func TestAdminContacts(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	user, system, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
+	user, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
@@ -228,9 +208,6 @@ func TestAdminContacts(t *testing.T) {
 		VALUES ($1, 'alice.vcf', 'urn:uuid:alice', $2, '{"fn":"Alice Example"}', 'e') RETURNING id`, user.ID, card).Scan(&cid); err != nil {
 		t.Fatalf("insert contact: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)`, cid, system.ID); err != nil {
-		t.Fatalf("tag system: %v", err)
-	}
 
 	if rec := do(h, "GET", "/dashboard/contacts", nil, cookie); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Alice Example") {
 		t.Fatalf("contacts page = %d, body missing name", rec.Code)
@@ -249,11 +226,6 @@ func TestAdminContacts(t *testing.T) {
 		SELECT EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $2)`, cid, workID).Scan(&tagged); err != nil || !tagged {
 		t.Fatalf("contact not tagged (tagged=%v err=%v)", tagged, err)
 	}
-	var inDefault bool
-	if err := pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $2)`, cid, system.ID).Scan(&inDefault); err != nil || inDefault {
-		t.Fatalf("contact stayed in the default book (inDefault=%v err=%v)", inDefault, err)
-	}
 
 	rec = do(h, "POST", "/dashboard/contacts/"+strconv.FormatInt(cid, 10)+"/delete",
 		url.Values{"csrf": {csrf}}, cookie)
@@ -270,7 +242,7 @@ func TestAdminSettingsAndContactCreate(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	if _, _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4); err != nil {
+	if _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
@@ -319,7 +291,7 @@ func TestAdminContactEdit(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	user, system, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
+	user, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
@@ -333,9 +305,6 @@ func TestAdminContactEdit(t *testing.T) {
 		INSERT INTO contacts (user_id, filename, uid, vcard_text, search_meta, etag)
 		VALUES ($1, 'alice.vcf', 'urn:uuid:edit', $2, '{}', 'e') RETURNING id`, user.ID, card).Scan(&cid); err != nil {
 		t.Fatalf("insert contact: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)`, cid, system.ID); err != nil {
-		t.Fatalf("tag system: %v", err)
 	}
 
 	// Structured name plus typed rows, including a custom key that must survive.
@@ -392,7 +361,7 @@ func TestAdminSidebarOOB(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	if _, _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4); err != nil {
+	if _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
@@ -417,7 +386,7 @@ func TestAdminPalette(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	user, _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
+	user, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
@@ -543,7 +512,7 @@ func TestAdminBulkContacts(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	user, system, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
+	user, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "secret", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
@@ -569,9 +538,6 @@ func TestAdminBulkContacts(t *testing.T) {
 			VALUES ($1, $2, $3, $4, '{}', 'e') RETURNING id`,
 			user.ID, filename, uid, card).Scan(&id); err != nil {
 			t.Fatalf("insert contact: %v", err)
-		}
-		if _, err := pool.Exec(ctx, `INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)`, id, system.ID); err != nil {
-			t.Fatalf("tag system: %v", err)
 		}
 		return id
 	}
@@ -603,16 +569,15 @@ func TestAdminBulkContacts(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("bulk set = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	var inPersonal, inWork, inSystem bool
+	var inPersonal, inWork bool
 	if err := pool.QueryRow(ctx, `
 		SELECT EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $2),
-		       EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $3),
-		       EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $4)`,
-		a, personalID, workID, system.ID).Scan(&inPersonal, &inWork, &inSystem); err != nil {
+		       EXISTS(SELECT 1 FROM contact_books WHERE contact_id = $1 AND book_id = $3)`,
+		a, personalID, workID).Scan(&inPersonal, &inWork); err != nil {
 		t.Fatalf("read tags: %v", err)
 	}
-	if !inPersonal || inWork || inSystem {
-		t.Fatalf("set lists: personal=%v work=%v system=%v, want personal only", inPersonal, inWork, inSystem)
+	if !inPersonal || inWork {
+		t.Fatalf("set lists: personal=%v work=%v, want personal only", inPersonal, inWork)
 	}
 
 	// Bulk delete: Bob is soft-deleted.

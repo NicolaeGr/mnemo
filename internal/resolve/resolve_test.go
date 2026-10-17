@@ -12,7 +12,7 @@ func b(id int64, tiers ...string) store.Book {
 
 func TestCompute(t *testing.T) {
 	active := []store.Book{
-		b(1, "primary", "secondary"), // system book
+		b(1, "primary", "secondary"), // all-tier book
 		b(2, "secondary"),            // work book
 		b(3, "primary"),              // family book
 	}

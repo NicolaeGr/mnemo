@@ -15,18 +15,14 @@ func TestPrincipalOverrideAndTier(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 
-	user, system, err := store.NewUsers(pool).Signup(ctx, "ovuser", "ov@example.com", "Ov", "pw", 4)
+	user, err := store.NewUsers(pool).Signup(ctx, "ovuser", "ov@example.com", "Ov", "pw", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 	work := insertBook(t, ctx, pool, user.ID, "work", "{secondary}")
 	principal := insertPrincipal(t, ctx, pool, user.ID, "secondary")
 
-	contact := insertContact(t, ctx, pool, user.ID, system.ID)
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)`, contact, work.ID); err != nil {
-		t.Fatalf("tag work: %v", err)
-	}
+	insertContact(t, ctx, pool, user.ID, work.ID)
 
 	principalActor := model.Actor{UserID: user.ID, Username: "ovuser", PrincipalID: &principal}
 	visible := func() map[int64]bool {
@@ -70,7 +66,7 @@ func TestPrincipalOverrideAndTier(t *testing.T) {
 		t.Fatal("work book not visible after override cleared")
 	}
 
-	// Demoting to archived hides everything (system covers primary+secondary).
+	// Demoting to archived hides everything (work covers secondary only).
 	e = epochOf(t, ctx, pool, principal)
 	if err := setTier(t, ctx, pool, user.ID, principal, "archived"); err != nil {
 		t.Fatalf("set tier: %v", err)
@@ -96,7 +92,7 @@ func TestPrincipalLifecycle(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 
-	user, _, err := store.NewUsers(pool).Signup(ctx, "devuser", "dev@example.com", "Dev", "pw", 4)
+	user, err := store.NewUsers(pool).Signup(ctx, "devuser", "dev@example.com", "Dev", "pw", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}

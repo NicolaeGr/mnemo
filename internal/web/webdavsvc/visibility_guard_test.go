@@ -21,7 +21,7 @@ func TestPutDeleteGuardHiddenCard(t *testing.T) {
 	ctx := context.Background()
 
 	users := store.NewUsers(pool)
-	u, _, err := users.Signup(ctx, testUsername, testEmail, "Nick", testPassword, 4)
+	u, err := users.Signup(ctx, testUsername, testEmail, "Nick", testPassword, 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestPutDeleteGuardHiddenCard(t *testing.T) {
 	}
 
 	// The guard covers visibility, not creation. Secondary can still create a new
-	// card, which goes into the system book every tier sees.
+	// card, which stays untagged and is visible to every tier.
 	freshURL := ts.URL + "/carddav/" + testUsername + "/contacts/all/fresh.vcf"
 	if code, _ := do(t, secondary, http.MethodPut, freshURL, vcardBody("Fresh")); code != http.StatusCreated {
 		t.Fatalf("secondary create fresh card = %d, want 201", code)

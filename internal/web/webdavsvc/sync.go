@@ -269,7 +269,7 @@ func handleSync(w http.ResponseWriter, r *http.Request, b *backend, actor auth.A
 			if err != nil {
 				continue
 			}
-			if anyVisible(books, visible) {
+			if contactVisible(books, visible) {
 				entries = append(entries, syncEntry{filename: c.Filename, etag: contact.ETag})
 			}
 		}

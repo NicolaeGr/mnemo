@@ -72,9 +72,6 @@ templ ListCard(s store.BookSummary) {
 			<div class="min-w-0">
 				<div class="flex flex-wrap items-center gap-2">
 					<span class="truncate font-medium">{ s.Book.DisplayName }</span>
-					if s.Book.IsSystem {
-						@Badge("system", "muted")
-					}
 					if !s.Book.IsActive {
 						@Badge("inactive", "danger")
 					}
@@ -97,8 +94,9 @@ templ ListCard(s store.BookSummary) {
 				hx-get={ "/dashboard/books/" + strconv.FormatInt(s.Book.ID, 10) + "/edit" }
 				hx-target="#modal-root"
 				hx-swap="innerHTML"
-			>@Icon("edit")
-</button>
+			>
+				@Icon("edit")
+			</button>
 		</div>
 		<div class="border-t border-border">
 			if len(s.Preview) == 0 {
@@ -188,41 +186,29 @@ templ BookForm(b *store.Book) {
 			</div>
 		}
 		@TextField("Description", "description", bookDescription(b), "", false)
-		if b != nil && b.IsSystem {
-			<div>
-				<p class="mb-1 text-xs font-medium text-muted-foreground">Synced tiers</p>
-				<div class="flex flex-wrap gap-1">
-					for _, t := range b.SyncedTiers {
-						<span class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{ t }</span>
-					}
-				</div>
-				<p class="mt-1 text-xs text-muted-foreground">The system book always stays visible to primary and secondary devices.</p>
+		<fieldset>
+			<legend class="mb-1 text-xs font-medium text-muted-foreground">Synced tiers</legend>
+			<div class="flex flex-wrap gap-4">
+				for _, tier := range allTiers {
+					@CheckRow("tiers", tier, tier, hasTier(bookTiers(b), tier))
+				}
 			</div>
-		} else {
-			<fieldset>
-				<legend class="mb-1 text-xs font-medium text-muted-foreground">Synced tiers</legend>
-				<div class="flex flex-wrap gap-4">
-					for _, tier := range allTiers {
-						@CheckRow("tiers", tier, tier, hasTier(bookTiers(b), tier))
-					}
-				</div>
-				<p class="mt-1 text-xs text-muted-foreground">Pick at least one; archived can't be combined with primary or secondary.</p>
-			</fieldset>
-		}
-		if b != nil && !b.IsSystem {
+			<p class="mt-1 text-xs text-muted-foreground">Pick at least one; archived can't be combined with primary or secondary.</p>
+		</fieldset>
+		if b != nil {
 			<input type="hidden" name="active" value="false"/>
 			@CheckRow("active", "true", "Active", b.IsActive)
 		}
 		<div class="flex items-center justify-between gap-2 pt-2">
 			<div>
-				if b != nil && !b.IsSystem {
+				if b != nil {
 					<button
 						type="button"
 						class="inline-flex h-9 items-center rounded-md border border-red-600/40 px-3 text-sm text-red-600 transition-colors hover:bg-red-600/10"
 						hx-post={ "/dashboard/books/" + strconv.FormatInt(b.ID, 10) + "/delete" }
 						hx-target="#books-list"
 						hx-swap="outerHTML"
-						hx-confirm="Delete this book? Its contacts stay, retagged onto the system book."
+						hx-confirm="Delete this book? Its contacts stay and become untagged if it was their only list."
 					>Delete</button>
 				}
 			</div>

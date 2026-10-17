@@ -238,7 +238,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	pool := testPool(t)
 
 	users := store.NewUsers(pool)
-	if _, _, err := users.Signup(context.Background(), testUsername, testEmail, "Nick", testPassword, bcrypt.DefaultCost); err != nil {
+	if _, err := users.Signup(context.Background(), testUsername, testEmail, "Nick", testPassword, bcrypt.DefaultCost); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 

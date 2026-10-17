@@ -10,11 +10,10 @@ import (
 )
 
 // Retag applies add/remove of the actor's own book tags to a live contact.
-// Removing any book is allowed, including the system book; if nothing remains the
-// set is repaired to the system book (I1). The card's CATEGORIES is rewritten to
-// follow the new book set, which appends a 'put' when it changes; the sync_epoch
-// of every principal whose visibility of the card changed is also bumped.
-// Caller holds LockSync.
+// Removing every book leaves the contact untagged. The card's CATEGORIES is
+// rewritten to follow the new book set, which appends a 'put' when it changes;
+// the sync_epoch of every principal whose visibility of the card changed is also
+// bumped. Caller holds LockSync.
 func (s ScopedStore) Retag(ctx context.Context, contactID int64, addBookIDs, removeBookIDs []int64) error {
 	var filename string
 	err := s.Tx.QueryRow(ctx, `
@@ -32,19 +31,12 @@ func (s ScopedStore) Retag(ctx context.Context, contactID int64, addBookIDs, rem
 		return err
 	}
 
-	var systemID int64
-	if err := s.Tx.QueryRow(ctx,
-		`SELECT id FROM books WHERE owner_user_id = $1 AND is_system`, s.Actor.UserID,
-	).Scan(&systemID); err != nil {
-		return err
-	}
-
 	active, err := s.ActiveBooks(ctx)
 	if err != nil {
 		return err
 	}
 
-	after := applyRetag(before, systemID, active, addBookIDs, removeBookIDs)
+	after := applyRetag(before, active, addBookIDs, removeBookIDs)
 	if err := s.replaceTags(ctx, contactID, after); err != nil {
 		return err
 	}
@@ -103,9 +95,8 @@ func (s ScopedStore) tagSet(ctx context.Context, contactID int64) (map[int64]str
 }
 
 // applyRetag computes the final tag set: only the actor's own active books may
-// be added, system removal is dropped, and an empty result is repaired to just
-// the system book.
-func applyRetag(before map[int64]struct{}, systemID int64, active []Book, addIDs, removeIDs []int64) map[int64]struct{} {
+// be added, and an empty result stays empty (the contact is untagged).
+func applyRetag(before map[int64]struct{}, active []Book, addIDs, removeIDs []int64) map[int64]struct{} {
 	after := make(map[int64]struct{}, len(before)+len(addIDs))
 	for id := range before {
 		after[id] = struct{}{}
@@ -120,9 +111,6 @@ func applyRetag(before map[int64]struct{}, systemID int64, active []Book, addIDs
 	}
 	for _, id := range removeIDs {
 		delete(after, id)
-	}
-	if len(after) == 0 {
-		after[systemID] = struct{}{} // I1 repair
 	}
 	return after
 }
@@ -146,8 +134,8 @@ func (s ScopedStore) replaceTags(ctx context.Context, contactID int64, want map[
 }
 
 // principalsWhoseVisibilityChanged returns the user's principals whose view of
-// the card flipped between before and after: a principal cares only whether the
-// card sits in >= 1 book it can see (tier match, not disabled).
+// the card flipped between before and after. A principal sees an untagged card,
+// and sees a tagged card through any book it can see (tier match, not disabled).
 func (s ScopedStore) principalsWhoseVisibilityChanged(ctx context.Context, active []Book, before, after map[int64]struct{}) ([]int64, error) {
 	rows, err := s.Tx.Query(ctx, `
 		SELECT id, tier FROM principals WHERE user_id = $1`, s.Actor.UserID)
@@ -209,7 +197,7 @@ func (s ScopedStore) principalsWhoseVisibilityChanged(ctx context.Context, activ
 				visible[b.ID] = struct{}{}
 			}
 		}
-		if anyIn(before, visible) != anyIn(after, visible) {
+		if cardVisible(before, visible) != cardVisible(after, visible) {
 			bump = append(bump, p.id)
 		}
 	}
@@ -224,6 +212,12 @@ func anyIn(a, b map[int64]struct{}) bool {
 		}
 	}
 	return false
+}
+
+// cardVisible reports whether a card in these books is visible. An untagged
+// card is visible to every principal.
+func cardVisible(tags, visible map[int64]struct{}) bool {
+	return len(tags) == 0 || anyIn(tags, visible)
 }
 
 func hasTierStr(tiers []string, want string) bool {

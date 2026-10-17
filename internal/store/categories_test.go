@@ -12,17 +12,17 @@ import (
 )
 
 // TestCategoriesFollowBooks pins the rule that a card's CATEGORIES lists its
-// non-system book names and is rewritten whenever the tags or a book name change.
+// book names and is rewritten whenever the tags or a book name change.
 func TestCategoriesFollowBooks(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
-	user, system, err := store.NewUsers(pool).Signup(ctx, "catuser", "cat@example.com", "Cat", "pw", 4)
+	user, err := store.NewUsers(pool).Signup(ctx, "catuser", "cat@example.com", "Cat", "pw", 4)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 
 	work := insertBook(t, ctx, pool, user.ID, "work", "{primary}")
-	contact := insertContact(t, ctx, pool, user.ID, system.ID)
+	contact := insertContact(t, ctx, pool, user.ID)
 
 	withLockedTx(t, ctx, pool, user.ID, func(s store.ScopedStore) error {
 		return s.Retag(ctx, contact, []int64{work.ID}, nil)

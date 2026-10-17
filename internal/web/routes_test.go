@@ -22,7 +22,7 @@ func TestRouterServesUIAndAPI(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	users := store.NewUsers(pool)
-	if _, _, err := users.Signup(ctx, "ruser", "r@example.com", "R", "pw", 4); err != nil {
+	if _, err := users.Signup(ctx, "ruser", "r@example.com", "R", "pw", 4); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 	sess := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)

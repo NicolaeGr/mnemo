@@ -15,17 +15,18 @@ func TestRetag(t *testing.T) {
 	pool := resetPool(t)
 	ctx := context.Background()
 
-	user, system, err := store.NewUsers(pool).Signup(ctx, "retaguser", "retag@example.com", "Retag", "pw", 12)
+	user, err := store.NewUsers(pool).Signup(ctx, "retaguser", "retag@example.com", "Retag", "pw", 12)
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 
 	private := insertBook(t, ctx, pool, user.ID, "private", "{archived}")
 	home := insertBook(t, ctx, pool, user.ID, "home", "{primary}")
+	base := insertBook(t, ctx, pool, user.ID, "base", "{primary,secondary}")
 	archived := insertPrincipal(t, ctx, pool, user.ID, "archived")
 	primary := insertPrincipal(t, ctx, pool, user.ID, "primary")
 
-	contact := insertContact(t, ctx, pool, user.ID, system.ID)
+	contact := insertContact(t, ctx, pool, user.ID, base.ID)
 
 	// Moving the card into and out of the archived-only book flips the archived
 	// principal's view each time (epoch bumps), but not the primary principal's.
@@ -39,21 +40,20 @@ func TestRetag(t *testing.T) {
 	if got := epochOf(t, ctx, pool, primary); got != epochPrim {
 		t.Fatalf("primary principal bumped on an archived-only flip: %d != %d", got, epochPrim)
 	}
-	assertTags(t, ctx, pool, contact, system.ID, private.ID)
+	assertTags(t, ctx, pool, contact, private.ID, base.ID)
 
 	epochArch = epochOf(t, ctx, pool, archived)
 	retag(t, ctx, pool, user.ID, contact, nil, []int64{private.ID})
 	if got := epochOf(t, ctx, pool, archived); got <= epochArch {
 		t.Fatalf("archived principal epoch = %d after conceal, want > %d", got, epochArch)
 	}
-	assertTags(t, ctx, pool, contact, system.ID)
+	assertTags(t, ctx, pool, contact, base.ID)
 
-	// Re-removing an already-absent book and detaching the system book change
-	// nothing, so neither principal should be bumped again.
+	// Re-removing an already-absent book changes nothing, so neither principal
+	// should be bumped again.
 	epochArch = epochOf(t, ctx, pool, archived)
 	retag(t, ctx, pool, user.ID, contact, nil, []int64{private.ID})
-	retag(t, ctx, pool, user.ID, contact, nil, []int64{system.ID})
-	assertTags(t, ctx, pool, contact, system.ID)
+	assertTags(t, ctx, pool, contact, base.ID)
 	if got := epochOf(t, ctx, pool, archived); got != epochArch {
 		t.Fatalf("archived principal epoch changed on a no-op retag: %d != %d", got, epochArch)
 	}
@@ -65,6 +65,16 @@ func TestRetag(t *testing.T) {
 	retag(t, ctx, pool, user.ID, contact, nil, []int64{home.ID})
 	if got := epochOf(t, ctx, pool, primary); got != epochPrim {
 		t.Fatalf("primary principal bumped on within-visibility retag: %d != %d", got, epochPrim)
+	}
+
+	// An untagged card is visible to every principal, so tagging it into an
+	// archived-only book hides it from the primary principal.
+	retag(t, ctx, pool, user.ID, contact, nil, []int64{base.ID})
+	assertTags(t, ctx, pool, contact)
+	epochPrim = epochOf(t, ctx, pool, primary)
+	retag(t, ctx, pool, user.ID, contact, []int64{private.ID}, nil)
+	if got := epochOf(t, ctx, pool, primary); got <= epochPrim {
+		t.Fatalf("primary principal epoch = %d after hiding an untagged card, want > %d", got, epochPrim)
 	}
 }
 
@@ -118,10 +128,10 @@ func insertBook(t *testing.T, ctx context.Context, pool *pgxpool.Pool, owner int
 		INSERT INTO books (owner_user_id, slug, display_name, synced_tiers)
 		VALUES ($1, $2, $3, $4::principal_tier[])
 		RETURNING id, owner_user_id, slug, display_name, description, sort_order,
-		          is_active, is_system, synced_tiers::text[], created_at`,
+		          is_active, synced_tiers::text[], created_at`,
 		owner, slug, slug, tiers,
 	).Scan(&b.ID, &b.OwnerUserID, &b.Slug, &b.DisplayName, &b.Description,
-		&b.SortOrder, &b.IsActive, &b.IsSystem, &b.SyncedTiers, &b.CreatedAt)
+		&b.SortOrder, &b.IsActive, &b.SyncedTiers, &b.CreatedAt)
 	if err != nil {
 		t.Fatalf("insert book: %v", err)
 	}
@@ -139,7 +149,7 @@ func insertPrincipal(t *testing.T, ctx context.Context, pool *pgxpool.Pool, user
 	return id
 }
 
-func insertContact(t *testing.T, ctx context.Context, pool *pgxpool.Pool, userID, systemBook int64) int64 {
+func insertContact(t *testing.T, ctx context.Context, pool *pgxpool.Pool, userID int64, books ...int64) int64 {
 	t.Helper()
 	var id int64
 	err := pool.QueryRow(ctx, `
@@ -149,9 +159,11 @@ func insertContact(t *testing.T, ctx context.Context, pool *pgxpool.Pool, userID
 	if err != nil {
 		t.Fatalf("insert contact: %v", err)
 	}
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)`, id, systemBook); err != nil {
-		t.Fatalf("tag contact: %v", err)
+	for _, book := range books {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO contact_books (contact_id, book_id) VALUES ($1, $2)`, id, book); err != nil {
+			t.Fatalf("tag contact: %v", err)
+		}
 	}
 	return id
 }

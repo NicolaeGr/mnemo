@@ -1,6 +1,7 @@
 // Command seed fills a throwaway database with fixtures for manual CardDAV
-// testing: an admin account, a system book plus Family, Work, School, and
-// Medical books, a few dozen contacts spread across them, and two device tokens.
+// testing: an admin account, Family, Work, School, and Medical books, a few
+// dozen contacts spread across them, a few untagged contacts, and two device
+// tokens.
 package main
 
 import (
@@ -95,7 +96,7 @@ func main() {
 	}
 
 	users := store.NewUsers(st.PG)
-	admin, _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "password", cfg.BcryptCost)
+	admin, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "password", cfg.BcryptCost)
 	if err != nil {
 		log.Fatalf("signup: %v", err)
 	}
@@ -142,8 +143,8 @@ func main() {
 		log.Fatalf("issue thunderbird token: %v", err)
 	}
 
-	log.Printf("books: all(system)=%d family=%d work=%d school=%d medical=%d",
-		books["all"], books["family"], books["work"], books["school"], books["medical"])
+	log.Printf("books: family=%d work=%d school=%d medical=%d",
+		books["family"], books["work"], books["school"], books["medical"])
 	for slug, n := range counts {
 		log.Printf("contacts: %-12s %d", slug, n)
 	}
@@ -162,15 +163,6 @@ func seedBooks(ctx context.Context, pool *pgxpool.Pool, owner model.Actor, admin
 	ids := map[string]int64{}
 	err := store.WithTx(ctx, pool, owner, func(s store.ScopedStore) error {
 		if err := store.LockSync(ctx, s.Tx, adminID); err != nil {
-			return err
-		}
-		var sysID int64
-		if err := s.Tx.QueryRow(ctx,
-			`SELECT id FROM books WHERE owner_user_id = $1 AND is_system`, adminID).Scan(&sysID); err != nil {
-			return err
-		}
-		ids["all"] = sysID
-		if err := s.RenameBook(ctx, sysID, "General"); err != nil {
 			return err
 		}
 		for _, b := range specs {

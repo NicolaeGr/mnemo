@@ -35,8 +35,8 @@ type ContactFormData struct {
 	Suffix     string
 	Fields     []contact.Field
 	Addresses  []contact.Address
-	Books      []store.Book // choosable books (active, excluding the default)
-	Selected   []int64      // currently tagged non-default books
+	Books      []store.Book // selectable books (active)
+	Selected   []int64      // current tags
 	Action     string
 }
 

@@ -39,7 +39,7 @@ func main() {
 		log.Fatalf("count users: %v", err)
 	}
 	if count == 0 {
-		if _, _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "password", cfg.BcryptCost); err != nil {
+		if _, err := users.Signup(ctx, "admin", "admin@example.com", "Admin", "password", cfg.BcryptCost); err != nil {
 			log.Fatalf("bootstrap signup: %v", err)
 		}
 	}
