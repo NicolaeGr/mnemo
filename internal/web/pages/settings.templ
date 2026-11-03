@@ -7,20 +7,33 @@ import (
 	"github.com/nicolaegr/mnemo/internal/web/uictx"
 )
 
-templ SettingsPage(s uictx.Session, books []store.Book, defaultID *int64, errMsg string) {
+// SettingsView carries every settings section's data so the page and the modal
+// render the same content.
+type SettingsView struct {
+	Books       []store.Book
+	DefaultID   *int64
+	Network     []store.NetworkMember
+	Pending     []store.Invitation
+	InviteLink  string
+	InviteEmail string
+	InviteErr   string
+	ErrMsg      string
+}
+
+templ SettingsPage(s uictx.Session, v SettingsView) {
 	<div class="mx-auto max-w-2xl space-y-8">
 		<h1 class="text-xl font-semibold tracking-tight">Settings</h1>
-		@SettingsSections(s, books, defaultID, errMsg, "#settings-panel")
+		@SettingsSections(s, v, "#settings-panel")
 	</div>
 }
 
 // SettingsModal is the same sections shown inside the modal opened from the user
 // menu; its form targets the modal container so saves stay in place.
-templ SettingsModal(s uictx.Session, books []store.Book, defaultID *int64, errMsg string) {
-	@SettingsSections(s, books, defaultID, errMsg, "#settings-modal-panel")
+templ SettingsModal(s uictx.Session, v SettingsView) {
+	@SettingsSections(s, v, "#settings-modal-panel")
 }
 
-templ SettingsSections(s uictx.Session, books []store.Book, defaultID *int64, errMsg, target string) {
+templ SettingsSections(s uictx.Session, v SettingsView, target string) {
 	<section class="space-y-3">
 		<h2 class="text-sm font-semibold">Account</h2>
 		@SettingRow("Username", s.Username)
@@ -30,7 +43,13 @@ templ SettingsSections(s uictx.Session, books []store.Book, defaultID *int64, er
 	<section class="space-y-3">
 		<h2 class="text-sm font-semibold">Sync defaults</h2>
 		<div id={ settingsPanelID(target) }>
-			@SettingsBookForm(books, defaultID, errMsg, target)
+			@SettingsBookForm(v.Books, v.DefaultID, v.ErrMsg, target)
+		</div>
+	</section>
+	<section class="space-y-3">
+		<h2 class="text-sm font-semibold">Network</h2>
+		<div id={ settingsNetworkPanelID(target) }>
+			@SettingsNetworkForm(v, target)
 		</div>
 	</section>
 }
@@ -51,6 +70,56 @@ templ SettingsBookForm(books []store.Book, defaultID *int64, errMsg, target stri
 	</form>
 }
 
+templ SettingsNetworkForm(v SettingsView, target string) {
+	<form hx-post="/dashboard/settings/network" hx-target={ settingsNetworkSelector(target) } hx-swap="innerHTML" class="space-y-3">
+		<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+		<input type="hidden" name="target" value={ target }/>
+		if v.InviteErr != "" {
+			@ErrorBanner(v.InviteErr)
+		}
+		if v.InviteLink != "" {
+			<div class="rounded-lg border border-border bg-muted/40 p-4 text-sm">
+				<p class="font-medium">Invitation link</p>
+				<p class="mt-1 text-muted-foreground">Send this link to the person you want to connect with. It works once.</p>
+				<input readonly value={ v.InviteLink } onclick="this.select()" class="mt-3 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"/>
+			</div>
+		}
+		if len(v.Pending) > 0 {
+			<div class="space-y-2">
+				<p class="text-xs font-medium text-muted-foreground">Pending invitations</p>
+				for _, inv := range v.Pending {
+					<div class="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-4 py-3">
+						<div class="min-w-0">
+							<p class="truncate text-sm font-medium">{ inv.InviterName }</p>
+							<p class="text-xs text-muted-foreground">{ inviteKindLabel(inv.Kind) }</p>
+						</div>
+						<a href={ templ.SafeURL("/dashboard/invites/" + inv.Token) } class="text-sm underline">Review</a>
+					</div>
+				}
+			</div>
+		}
+		<div class="space-y-2">
+			<p class="text-xs font-medium text-muted-foreground">In your network</p>
+			if len(v.Network) == 0 {
+				<p class="text-sm text-muted-foreground">Nobody yet. Accepted invitations appear here.</p>
+			} else {
+				for _, m := range v.Network {
+					<div class="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-4 py-3">
+						<p class="truncate text-sm font-medium">{ networkMemberName(m) }</p>
+						<p class="truncate text-xs text-muted-foreground">{ m.Email }</p>
+					</div>
+				}
+			}
+		</div>
+		<div class="flex items-end gap-2">
+			<div class="flex-1">
+				@TextField("Invite by email", "email", v.InviteEmail, "friend@example.com", true)
+			</div>
+			@PrimaryButton("Create link")
+		</div>
+	</form>
+}
+
 templ SettingRow(label, value string) {
 	<div class="flex items-center justify-between gap-4 rounded-lg border border-border bg-background px-4 py-3">
 		<p class="text-sm font-medium">{ label }</p>
@@ -58,11 +127,29 @@ templ SettingRow(label, value string) {
 	</div>
 }
 
+func networkMemberName(m store.NetworkMember) string {
+	if m.Name != "" {
+		return m.Name
+	}
+	return m.Username
+}
+
 func settingsPanelID(target string) string {
 	if target == "#settings-modal-panel" {
 		return "settings-modal-panel"
 	}
 	return "settings-panel"
+}
+
+func settingsNetworkPanelID(target string) string {
+	if target == "#settings-modal-panel" {
+		return "settings-modal-network"
+	}
+	return "settings-network"
+}
+
+func settingsNetworkSelector(target string) string {
+	return "#" + settingsNetworkPanelID(target)
 }
 
 func defaultBookValue(id *int64) string {

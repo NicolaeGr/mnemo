@@ -52,6 +52,7 @@ func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) ht
 
 	mux.Handle("GET /login", a.authStack(http.HandlerFunc(a.loginPage)))
 	mux.Handle("POST /login", http.HandlerFunc(a.loginSubmit))
+	mux.Handle("GET /invite/{token}", a.authStack(http.HandlerFunc(a.inviteLanding)))
 	mux.Handle("POST /logout", a.mutate(http.HandlerFunc(a.logout)))
 	mux.Handle("GET /dashboard/modal/close", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -95,6 +96,11 @@ func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) ht
 	mux.Handle("GET /dashboard/settings", a.dashPage("Settings", a.settingsLeaf))
 	mux.Handle("GET /dashboard/settings/modal", a.modal(a.settingsModal))
 	mux.Handle("POST /dashboard/settings", a.mutate(http.HandlerFunc(a.saveSettings)))
+	mux.Handle("POST /dashboard/settings/network", a.mutate(http.HandlerFunc(a.createNetworkInvite)))
+
+	mux.Handle("GET /dashboard/invites/{token}", a.dashPage("Invitation", a.inviteLeaf))
+	mux.Handle("POST /dashboard/invites/{token}/accept", a.mutate(http.HandlerFunc(a.acceptInvite)))
+	mux.Handle("POST /dashboard/invites/{token}/decline", a.mutate(http.HandlerFunc(a.declineInvite)))
 
 	mux.Handle("GET /dashboard/palette", a.requireSession(http.HandlerFunc(a.palette)))
 
@@ -179,6 +185,7 @@ func (a *Admin) loginSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session error", http.StatusInternalServerError)
 		return
 	}
+	a.resumeInvite(w, r)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1264,27 +1271,42 @@ func (a *Admin) desiredBooks(r *http.Request) ([]int64, error) {
 
 func (a *Admin) settingsLeaf(r *http.Request) templ.Component {
 	s := uictx.From(r.Context())
-	books, defaultID, err := a.settingsData(r)
+	v, err := a.settingsData(r)
 	if err != nil {
-		return pages.SettingsPage(s, nil, nil, err.Error())
+		return pages.SettingsPage(s, pages.SettingsView{ErrMsg: err.Error()})
 	}
-	return pages.SettingsPage(s, books, defaultID, "")
+	return pages.SettingsPage(s, v)
 }
 
 func (a *Admin) settingsModal(r *http.Request) (string, templ.Component) {
 	s := uictx.From(r.Context())
-	books, defaultID, err := a.settingsData(r)
-	msg := errorText(err)
-	return "Settings", pages.SettingsModal(s, books, defaultID, msg)
+	v, err := a.settingsData(r)
+	if err != nil {
+		v.ErrMsg = err.Error()
+	}
+	return "Settings", pages.SettingsModal(s, v)
 }
 
-func (a *Admin) settingsData(r *http.Request) ([]store.Book, *int64, error) {
+func (a *Admin) settingsData(r *http.Request) (pages.SettingsView, error) {
+	ctx := r.Context()
+	userID := a.actor(r).UserID
 	books, err := a.listBooks(r)
 	if err != nil {
-		return nil, nil, err
+		return pages.SettingsView{}, err
 	}
-	def, err := a.users.DefaultBook(r.Context(), a.actor(r).UserID)
-	return books, def, err
+	def, err := a.users.DefaultBook(ctx, userID)
+	if err != nil {
+		return pages.SettingsView{}, err
+	}
+	network, err := store.NetworkMembers(ctx, a.pool, userID)
+	if err != nil {
+		return pages.SettingsView{}, err
+	}
+	pending, err := store.PendingInvites(ctx, a.pool, userID, uictx.From(ctx).Email)
+	if err != nil {
+		return pages.SettingsView{}, err
+	}
+	return pages.SettingsView{Books: books, DefaultID: def, Network: network, Pending: pending}, nil
 }
 
 func (a *Admin) saveSettings(w http.ResponseWriter, r *http.Request) {
@@ -1301,12 +1323,172 @@ func (a *Admin) saveSettings(w http.ResponseWriter, r *http.Request) {
 			cause = a.users.SetDefaultBook(r.Context(), a.actor(r).UserID, id)
 		}
 	}
-	books, def, err := a.settingsData(r)
+	books, def, err := a.settingsBookData(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	renderTempl(w, r, pages.SettingsBookForm(books, def, errorText(cause), target))
+}
+
+func (a *Admin) settingsBookData(r *http.Request) ([]store.Book, *int64, error) {
+	books, err := a.listBooks(r)
+	if err != nil {
+		return nil, nil, err
+	}
+	def, err := a.users.DefaultBook(r.Context(), a.actor(r).UserID)
+	return books, def, err
+}
+
+func (a *Admin) createNetworkInvite(w http.ResponseWriter, r *http.Request) {
+	target := r.FormValue("target")
+	if target == "" {
+		target = "#settings-network-panel"
+	}
+	view, err := a.settingsData(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
+	view.InviteEmail = email
+	if msg := a.networkInviteProblem(r, email); msg != "" {
+		view.InviteErr = msg
+	} else {
+		inv, err := store.CreateInvite(r.Context(), a.pool, a.actor(r).UserID, store.InviteNetwork, 0, email)
+		if err != nil {
+			view.InviteErr = err.Error()
+		} else {
+			view.InviteLink = inviteURL(r, inv.Token)
+			view.InviteEmail = ""
+		}
+	}
+	renderTempl(w, r, pages.SettingsNetworkForm(view, target))
+}
+
+func (a *Admin) networkInviteProblem(r *http.Request, email string) string {
+	if email == "" || !strings.Contains(email, "@") {
+		return "Enter a valid email address."
+	}
+	me := uictx.From(r.Context()).UserID
+	other, err := a.users.ByLogin(r.Context(), email)
+	if errors.Is(err, model.ErrNotFound) {
+		return ""
+	}
+	if err != nil {
+		return err.Error()
+	}
+	if other.ID == me {
+		return "You cannot invite yourself."
+	}
+	connected, err := store.NetworkHas(r.Context(), a.pool, me, other.ID)
+	if err != nil {
+		return err.Error()
+	}
+	if connected {
+		return "This person is already in your network."
+	}
+	return ""
+}
+
+// inviteLanding sends a visitor holding an invitation link to sign in first and
+// keeps the token in a short-lived cookie for the post-login redirect.
+func (a *Admin) inviteLanding(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	if !validInviteToken(token) {
+		seg.Page(w, r, "Invitation", pages.InviteNotice("Invitation unavailable", "This link is not valid."))
+		return
+	}
+	if _, err := store.InviteByToken(r.Context(), a.pool, token); err != nil {
+		seg.Page(w, r, "Invitation", pages.InviteNotice("Invitation unavailable", "This invitation is no longer open."))
+		return
+	}
+	if _, ok := a.session.Read(r); ok {
+		http.Redirect(w, r, "/dashboard/invites/"+token, http.StatusSeeOther)
+		return
+	}
+	a.setInviteCookie(w, token)
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+func (a *Admin) inviteLeaf(r *http.Request) templ.Component {
+	inv, err := store.InviteByToken(r.Context(), a.pool, r.PathValue("token"))
+	if err != nil {
+		return pages.InviteMissing()
+	}
+	me := uictx.From(r.Context()).UserID
+	return pages.InvitePage(pages.InviteView{
+		Token:       inv.Token,
+		Kind:        inv.Kind,
+		InviterName: inv.InviterName,
+		Status:      inv.Status,
+		Pending:     inv.Status == "pending" && inv.InviterID != me && (inv.InviteeID == nil || *inv.InviteeID == me),
+		Own:         inv.InviterID == me,
+	})
+}
+
+func (a *Admin) acceptInvite(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	_, _ = store.AcceptInvite(r.Context(), a.pool, token, a.actor(r).UserID)
+	http.Redirect(w, r, "/dashboard/invites/"+token, http.StatusSeeOther)
+}
+
+func (a *Admin) declineInvite(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	_ = store.DeclineInvite(r.Context(), a.pool, token, a.actor(r).UserID)
+	http.Redirect(w, r, "/dashboard/invites/"+token, http.StatusSeeOther)
+}
+
+// resumeInvite redirects a fresh login to the invitation that sent the user to
+// the sign-in page.
+func (a *Admin) resumeInvite(w http.ResponseWriter, r *http.Request) {
+	c, err := r.Cookie(inviteCookie)
+	if err != nil || !validInviteToken(c.Value) {
+		return
+	}
+	a.clearInviteCookie(w)
+	if _, err := store.InviteByToken(r.Context(), a.pool, c.Value); err == nil {
+		w.Header().Set("X-Redirect", "/dashboard/invites/"+c.Value)
+	}
+}
+
+const inviteCookie = "mnemo_invite"
+
+func (a *Admin) setInviteCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name: inviteCookie, Value: token, Path: "/", HttpOnly: true,
+		Secure: a.session.Secure, SameSite: a.session.SameSite, MaxAge: 7 * 24 * 60 * 60,
+	})
+}
+
+func (a *Admin) clearInviteCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name: inviteCookie, Value: "", Path: "/", HttpOnly: true,
+		Secure: a.session.Secure, SameSite: a.session.SameSite, MaxAge: -1,
+	})
+}
+
+func validInviteToken(t string) bool {
+	if t == "" || len(t) > 64 {
+		return false
+	}
+	for _, c := range t {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func inviteURL(r *http.Request, token string) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	}
+	return scheme + "://" + r.Host + "/invite/" + token
 }
 
 // --- palette ---

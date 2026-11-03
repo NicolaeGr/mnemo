@@ -1,0 +1,79 @@
+package pages
+
+import (
+	"github.com/nicolaegr/mnemo/internal/web/uictx"
+)
+
+// InviteView is the acceptance page for one invitation token.
+type InviteView struct {
+	Token       string
+	Kind        string
+	InviterName string
+	Status      string
+	Pending     bool
+	Own         bool
+	ErrMsg      string
+}
+
+func inviteKindLabel(kind string) string {
+	switch kind {
+	case "contact_share":
+		return "Contact share"
+	case "group_invite":
+		return "Group invitation"
+	case "network_request":
+		return "Network request"
+	}
+	return "Invitation"
+}
+
+// InviteNotice is the public landing page for a missing, used, or revoked link.
+templ InviteNotice(title, message string) {
+	<div class="rounded-xl border border-border bg-background p-8 text-center shadow-lg">
+		<h1 class="text-xl font-semibold tracking-tight">{ title }</h1>
+		<p class="mt-2 text-sm text-muted-foreground">{ message }</p>
+		<a href="/login" class="mt-6 inline-flex h-9 items-center rounded-md bg-accent px-3 text-sm text-accent-foreground transition-opacity hover:opacity-90">Go to sign in</a>
+	</div>
+}
+
+templ InviteMissing() {
+	<div class="mx-auto max-w-xl rounded-xl border border-border bg-background p-8 shadow-lg">
+		<h1 class="text-xl font-semibold tracking-tight">Invitation unavailable</h1>
+		<p class="mt-2 text-sm text-muted-foreground">This invitation does not exist or was addressed to someone else.</p>
+		<a href="/dashboard" class="mt-6 inline-flex text-sm underline">Back to dashboard</a>
+	</div>
+}
+
+templ InvitePage(v InviteView) {
+	<div class="mx-auto max-w-xl">
+		<div class="rounded-xl border border-border bg-background p-8 shadow-lg">
+			<p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">{ inviteKindLabel(v.Kind) }</p>
+			<h1 class="mt-2 text-xl font-semibold tracking-tight">{ v.InviterName } invited you</h1>
+			<p class="mt-2 text-sm text-muted-foreground">Accepting connects you to { v.InviterName } and adds both of you to each other's network.</p>
+			if v.ErrMsg != "" {
+				<div class="mt-4">
+					@ErrorBanner(v.ErrMsg)
+				</div>
+			}
+			if v.Pending {
+				<div class="mt-6 flex gap-2">
+					<form method="post" action={ templ.SafeURL("/dashboard/invites/" + v.Token + "/accept") }>
+						<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+						@PrimaryButton("Accept")
+					</form>
+					<form method="post" action={ templ.SafeURL("/dashboard/invites/" + v.Token + "/decline") }>
+						<input type="hidden" name="csrf" value={ uictx.From(ctx).CSRF }/>
+						@DangerButton("Decline")
+					</form>
+				</div>
+			} else if v.Own {
+				<p class="mt-6 text-sm text-muted-foreground">You created this invitation. Share its link with the person you meant to invite.</p>
+			} else if v.Status == "accepted" {
+				<p class="mt-6 text-sm text-muted-foreground">You accepted this invitation.</p>
+			} else {
+				<p class="mt-6 text-sm text-muted-foreground">This invitation is no longer open.</p>
+			}
+			<a href="/dashboard" class="mt-6 inline-flex text-sm underline">Back to dashboard</a>
+		</div>
+	</div>
+}

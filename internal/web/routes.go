@@ -61,5 +61,5 @@ func isUIPath(p string) bool {
 	case "/login", "/logout", "/dashboard":
 		return true
 	}
-	return strings.HasPrefix(p, "/dashboard/")
+	return strings.HasPrefix(p, "/dashboard/") || strings.HasPrefix(p, "/invite/")
 }
