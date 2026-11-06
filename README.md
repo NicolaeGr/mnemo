@@ -72,15 +72,15 @@ To change a password later, run `server -set-password you`. It reads the new pas
 
 ## Configuration
 
-| Variable             | Default                                               | Purpose                                                                |
-| -------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------- |
-| `ADDR`               | `:8080`                                               | Listen address                                                         |
-| `DATABASE_URL`       | built from `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE` | Postgres connection string                                             |
-| `SESSION_SECRET`     | random per start                                      | Signs the web session cookie. Set it, or sessions reset on restart     |
-| `COOKIE_SECURE`      | `false`                                               | Set `true` when the server is reached over HTTPS                       |
-| `TRUSTED_PROXIES`    | loopback                                              | CIDRs whose `X-Forwarded-For` is honoured. Add your reverse proxy here |
-| `AUTH_FAILURE_LIMIT` | `20`                                                  | Credential failures per client address per minute, on each plane       |
-| `DAV_TOKEN_PASSWORD` | `false`                                               | Let a DAV client send its device token as the Basic password           |
+| Variable             | Default                                               | Purpose                                                                                |
+| -------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `ADDR`               | `:8080`                                               | Listen address                                                                         |
+| `DATABASE_URL`       | built from `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE` | Postgres connection string                                                             |
+| `SESSION_SECRET`     | random per start                                      | Signs the web session cookie. Set it, or sessions reset on restart                     |
+| `COOKIE_SECURE`      | `false`                                               | Set `true` when the server is reached over HTTPS                                       |
+| `TRUSTED_PROXIES`    | loopback                                              | CIDRs whose `X-Forwarded-For` is honoured. Add your reverse proxy here                 |
+| `AUTH_FAILURE_LIMIT` | `20`                                                  | Credential failures per client address per minute, on each plane                       |
+| `DAV_TOKEN_PASSWORD` | `true`                                                | Let a DAV client send its device token as the Basic password. Set `false` to reject it |
 
 The DAV plane, the REST API, and the admin UI each keep their own auth failure counter, so a device retrying a stale token cannot lock the web UI out.
 

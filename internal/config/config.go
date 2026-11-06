@@ -29,9 +29,10 @@ type Config struct {
 	AuthFailureLimit int
 
 	// DAVTokenPassword lets a DAV client send its device token as the Basic
-	// password, for clients that cannot send a Bearer header. It affects the DAV
-	// plane only. Off by default, because clients store Basic passwords as
-	// long-lived account secrets.
+	// password, for clients that cannot send a Bearer header. On by default,
+	// since DAVx5 and Thunderbird only speak Basic and would otherwise be stuck
+	// to the account password and every tier. Set DAV_TOKEN_PASSWORD=false to
+	// disable it.
 	DAVTokenPassword bool
 }
 
@@ -51,13 +52,18 @@ func Load() Config {
 	}
 }
 
-// tokenPasswordEnabled reads DAV_TOKEN_PASSWORD, falling back to the old
-// INSECURE_TOKEN_AUTH name so existing deployments keep working.
+// tokenPasswordEnabled reports whether a device token may be sent as the Basic
+// password. It defaults to true, because DAVx5 and Thunderbird cannot send a
+// Bearer header. Set DAV_TOKEN_PASSWORD=false to reject tokens in that slot.
+// INSECURE_TOKEN_AUTH is the old name and is still honoured.
 func tokenPasswordEnabled() bool {
-	if v := os.Getenv("DAV_TOKEN_PASSWORD"); v != "" {
+	if v, ok := os.LookupEnv("DAV_TOKEN_PASSWORD"); ok {
+		return v != "false"
+	}
+	if v, ok := os.LookupEnv("INSECURE_TOKEN_AUTH"); ok {
 		return v == "true"
 	}
-	return os.Getenv("INSECURE_TOKEN_AUTH") == "true"
+	return true
 }
 
 func databaseURL() string {
