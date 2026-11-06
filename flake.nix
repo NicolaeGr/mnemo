@@ -57,6 +57,8 @@
 
             modules = ./gomod2nix.toml;
 
+            doCheck = false;
+
             postInstall = ''
               mkdir -p $out/share/mnemo
               cp -r ${./assets} $out/share/mnemo/assets
@@ -89,6 +91,12 @@
           };
         }
       );
+
+      checks = forEachSystem (system: {
+        default = self.packages.${system}.default.overrideAttrs (_: {
+          doCheck = true;
+        });
+      });
 
       apps = forEachSystem (system: {
         default = {
