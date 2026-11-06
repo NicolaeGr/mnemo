@@ -1,0 +1,46 @@
+schema = 3
+
+[mod]
+  [mod.'github.com/a-h/templ']
+    version = 'v0.3.1020'
+    hash = 'sha256-CdZZ9Td8IbeYsjBqqr+TixEIlLjezkmah0Ww2qrv7JQ='
+
+  [mod.'github.com/emersion/go-vcard']
+    version = 'v0.1.0'
+    hash = 'sha256-q3krElOAUpSTV3H44/akj/tKsEh5Pr0gQmbsg4Z8g3M='
+
+  [mod.'github.com/emersion/go-webdav']
+    version = 'v0.7.0'
+    hash = 'sha256-w7b7tLNrIHgoUVSCRll6tLg/j053lJcVqPhayy1lwS8='
+
+  [mod.'github.com/go-chi/chi/v5']
+    version = 'v5.3.1'
+    hash = 'sha256-OaGcE3d9w3Yq0ThDxG8YNvpwAQgaTsKqOL6ofZIXAB4='
+
+  [mod.'github.com/jackc/pgpassfile']
+    version = 'v1.0.0'
+    hash = 'sha256-H0nFbC34/3pZUFnuiQk9W7yvAMh6qJDrqvHp+akBPLM='
+
+  [mod.'github.com/jackc/pgservicefile']
+    version = 'v0.0.0-20240606120523-5a60cdf6a761'
+    hash = 'sha256-ETpGsLAA2wcm5xJBayr/mZrCE1YsWbnkbSSX3ptrFn0='
+
+  [mod.'github.com/jackc/pgx/v5']
+    version = 'v5.10.0'
+    hash = 'sha256-rDJ6VNA0Pzei2KwZjETA1uOMgb5yuXJRgxUauwID630='
+
+  [mod.'github.com/jackc/puddle/v2']
+    version = 'v2.2.2'
+    hash = 'sha256-IUxdu4JYfsCh/qlz2SiUWu7EVPHhyooiVA4oaS2Z6yk='
+
+  [mod.'golang.org/x/crypto']
+    version = 'v0.55.0'
+    hash = 'sha256-99uV/ESeqhaDEwqbXxDpePuwzO0JoEHGhqZXZVHq/H4='
+
+  [mod.'golang.org/x/sync']
+    version = 'v0.22.0'
+    hash = 'sha256-VZjl0fAM0p/nI81zh+pdBjzxFupx0UcKYXBBpL2ZS7k='
+
+  [mod.'golang.org/x/text']
+    version = 'v0.41.0'
+    hash = 'sha256-22nHcolG87qSPahT2Ey8S5iGlCLAglE9ObYXO6XZ3ZY='
