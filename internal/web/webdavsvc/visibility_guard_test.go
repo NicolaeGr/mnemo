@@ -64,7 +64,7 @@ func TestPutDeleteGuardHiddenCard(t *testing.T) {
 		t.Fatalf("issue secondary token: %v", err)
 	}
 
-	ts := httptest.NewServer(webdavsvc.New(users, pool))
+	ts := httptest.NewServer(webdavsvc.New(users, pool, testGate(users, pool)))
 	defer ts.Close()
 	secondary := bearerHTTPClient("Bearer " + secondaryTok)
 	primary := bearerHTTPClient("Bearer " + primaryTok)

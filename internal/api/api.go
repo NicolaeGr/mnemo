@@ -1,7 +1,7 @@
 // Package api exposes the REST surface that drives book and tag mutations and
 // account management, so device principals actually see epoch bumps. Auth is
-// the same Bearer-or-Basic scheme as the DAV plane except for user signup,
-// which is anonymous. Every other request acts as the resolved user.
+// Basic account credentials only, since device tokens stay on the DAV plane,
+// and every request acts as the resolved user.
 package api
 
 import (
@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -30,11 +29,8 @@ type api struct {
 	pool  *pgxpool.Pool
 }
 
-// signupBcryptCost is the bcrypt cost signup uses. C2.6 sets the minimum at 12.
-const signupBcryptCost = 12
-
 // New builds the /api/v1 handler.
-func New(users *store.Users, pool *pgxpool.Pool, opts ...auth.Option) http.Handler {
+func New(users *store.Users, pool *pgxpool.Pool, cfg auth.Config) http.Handler {
 	a := &api{users: users, pool: pool}
 	r := chi.NewRouter()
 
@@ -71,14 +67,8 @@ func New(users *store.Users, pool *pgxpool.Pool, opts ...auth.Option) http.Handl
 
 	r.Post("/events/force-resync", a.forceResync)
 
-	authed := auth.RequireDAV(users, store.NewPrincipals(pool), r, opts...)
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Method == http.MethodPost && req.URL.Path == "/users" {
-			a.signup(w, req)
-			return
-		}
-		authed.ServeHTTP(w, req)
-	})
+	authed := cfg.Gate(users, nil).Account(r)
+	return authed
 }
 
 type bookBody struct {
@@ -717,45 +707,6 @@ func (a *api) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	err = a.users.SetDefaultBook(r.Context(), actor.UserID, *body.DefaultBookID)
 	writeErr(w, err)
-}
-
-type signupIn struct {
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Name     string `json:"name"`
-	Password string `json:"password"`
-}
-
-// usernameShape mirrors the users.username check constraint, so a bad shape is
-// rejected as 400 rather than surfacing as a 500 from the constraint.
-var usernameShape = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,63}$`)
-
-func validateSignup(body signupIn) error {
-	if !usernameShape.MatchString(body.Username) {
-		return model.ErrPrecondition
-	}
-	if !strings.Contains(body.Email, "@") || strings.ContainsAny(body.Email, " \t") {
-		return model.ErrPrecondition
-	}
-	if body.Password == "" {
-		return model.ErrPrecondition
-	}
-	return nil
-}
-
-// signup creates an account with an empty settings row. Anonymous.
-func (a *api) signup(w http.ResponseWriter, r *http.Request) {
-	var body signupIn
-	if err := decodeJSON(r, &body); err != nil {
-		writeErr(w, err)
-		return
-	}
-	if err := validateSignup(body); err != nil {
-		writeErr(w, err)
-		return
-	}
-	u, err := a.users.Signup(r.Context(), body.Username, body.Email, body.Name, body.Password, signupBcryptCost)
-	writeJSON(w, 201, meOut{u.ID, u.Username, u.Email, u.Name}, err)
 }
 
 func bookParam(w http.ResponseWriter, r *http.Request) (int64, error) {

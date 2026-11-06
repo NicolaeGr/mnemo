@@ -27,88 +27,144 @@ func ActorFrom(ctx context.Context) (Actor, bool) {
 	return a, ok
 }
 
-// Option configures credential admission.
-type Option func(*options)
-
-type options struct {
-	allowTokenPassword bool
+// Config is the shared credential policy. Each plane builds its own gate from
+// it, so a device hammering DAV cannot lock the web UI out.
+type Config struct {
+	// IPs resolves the client address behind a reverse proxy. Nil trusts
+	// loopback only.
+	IPs *ClientIPs
+	// FailuresPerMinute caps credential failures per client address on each
+	// plane. Zero means defaultFailuresPerMinute.
+	FailuresPerMinute int
+	// TokenPassword lets a DAV client send its device token as the Basic
+	// password, for clients that cannot send a Bearer header. DAV only. Off by
+	// default, because clients store Basic passwords as long-lived account
+	// secrets.
+	TokenPassword bool
 }
 
-// WithTokenPassword lets a device token be presented as the Basic password.
-// Real CardDAV clients cannot send a Bearer header, so they need this to reach a
-// tier-gated view. Opt-in, since the token then travels in a cleartext header.
-func WithTokenPassword(enabled bool) Option {
-	return func(o *options) { o.allowTokenPassword = enabled }
+const defaultFailuresPerMinute = 20
+
+// MinPasswordLength is the floor for account passwords on signup, bootstrap,
+// and the set-password flag.
+const MinPasswordLength = 8
+
+// Gate authenticates one plane.
+type Gate struct {
+	users         *store.Users
+	principals    *store.PrincipalStore
+	ips           *ClientIPs
+	failures      *Limiter
+	tokenPassword bool
 }
 
-func optionsFrom(opts []Option) options {
-	var o options
-	for _, opt := range opts {
-		opt(&o)
+// Gate builds an authenticator for one plane. Each call gets its own failure
+// limiter.
+func (c Config) Gate(users *store.Users, principals *store.PrincipalStore) *Gate {
+	return &Gate{
+		users:         users,
+		principals:    principals,
+		ips:           c.ips(),
+		failures:      NewLimiter(c.failuresPerMinute(), time.Minute),
+		tokenPassword: c.TokenPassword,
 	}
-	return o
 }
 
-// RequireDAV authenticates as a device principal (Bearer, or a token as the
-// Basic password when enabled) or as an account (Basic username and password).
-// An account has no principal and sees every tier; a principal's tier gates it.
-func RequireDAV(users *store.Users, principals *store.PrincipalStore, next http.Handler, opts ...Option) http.Handler {
-	o := optionsFrom(opts)
+// Guard returns a limiter and IP resolver for a caller that verifies requests
+// itself, such as the admin login form or the signup endpoint. A max below one
+// uses the plane default.
+func (c Config) Guard(max int, window time.Duration) (*Limiter, *ClientIPs) {
+	if max <= 0 {
+		max = c.failuresPerMinute()
+	}
+	return NewLimiter(max, window), c.ips()
+}
+
+func (c Config) ips() *ClientIPs {
+	if c.IPs == nil {
+		return DefaultClientIPs()
+	}
+	return c.IPs
+}
+
+func (c Config) failuresPerMinute() int {
+	if c.FailuresPerMinute <= 0 {
+		return defaultFailuresPerMinute
+	}
+	return c.FailuresPerMinute
+}
+
+type policy struct {
+	bearer        bool
+	tokenPassword bool
+}
+
+// DAV admits a device principal (Bearer, or a token as the Basic password when
+// enabled) or an account (Basic login and password). An account has no
+// principal and sees every tier; a principal's tier gates it.
+func (g *Gate) DAV(next http.Handler) http.Handler {
+	return g.require(next, policy{bearer: true, tokenPassword: g.tokenPassword})
+}
+
+// Account admits Basic account credentials only.
+func (g *Gate) Account(next http.Handler) http.Handler {
+	return g.require(next, policy{})
+}
+
+func (g *Gate) require(next http.Handler, p policy) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
+		ip := g.ips.From(r)
 		now := time.Now()
-		if !authFailures.allowed(ip, now) {
+		if !g.failures.Allow(ip, now) {
 			tooManyRequests(w)
 			return
 		}
-		actor, ok := resolve(r, users, principals, o)
+		actor, ok := g.resolve(r, p)
 		if !ok {
-			authFailures.fail(ip, now)
+			g.failures.Fail(ip, now)
 			unauthorized(w)
 			return
 		}
-		authFailures.clear(ip)
+		g.failures.Clear(ip)
 		next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
 	})
 }
 
-// authFailures caps auth-failure bursts per IP (10/min).
-var authFailures = newFailLimiter(10, time.Minute)
-
-func resolve(r *http.Request, users *store.Users, principals *store.PrincipalStore, o options) (Actor, bool) {
-	authz := r.Header.Get("Authorization")
-	if strings.HasPrefix(authz, "Bearer ") {
-		return principalActor(r.Context(), users, principals, strings.TrimPrefix(authz, "Bearer "))
+func (g *Gate) resolve(r *http.Request, p policy) (Actor, bool) {
+	if p.bearer {
+		if authz := r.Header.Get("Authorization"); strings.HasPrefix(authz, "Bearer ") {
+			return g.principal(r.Context(), strings.TrimPrefix(authz, "Bearer "))
+		}
 	}
 	login, password, ok := r.BasicAuth()
 	if !ok {
 		return Actor{}, false
 	}
-	if u, err := users.ByLogin(r.Context(), login); err == nil && store.CheckPassword(u, password) {
+	if u, ok := g.users.Authenticate(r.Context(), login, password); ok {
 		return Actor{UserID: u.ID, Username: u.Username}, true
 	}
 	// Token presented as the password, tried only after the account check and
 	// only when enabled.
-	if o.allowTokenPassword {
-		return principalActor(r.Context(), users, principals, password)
+	if p.tokenPassword {
+		return g.principal(r.Context(), password)
 	}
 	return Actor{}, false
 }
 
-func principalActor(ctx context.Context, users *store.Users, principals *store.PrincipalStore, raw string) (Actor, bool) {
+func (g *Gate) principal(ctx context.Context, raw string) (Actor, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return Actor{}, false
 	}
-	p, err := principals.ByTokenHash(ctx, store.TokenHashOf(raw))
+	p, err := g.principals.ByTokenHash(ctx, store.TokenHashOf(raw))
 	if err != nil {
 		return Actor{}, false
 	}
-	u, err := users.ByID(ctx, p.UserID)
+	u, err := g.users.ByID(ctx, p.UserID)
 	if err != nil {
 		return Actor{}, false
 	}
-	_ = principals.Touch(ctx, p.ID)
+	_ = g.principals.Touch(ctx, p.ID)
 	id := p.ID
 	return Actor{UserID: p.UserID, Username: u.Username, PrincipalID: &id}, true
 }

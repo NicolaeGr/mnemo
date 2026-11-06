@@ -27,7 +27,7 @@ func TestAdminImportAndExport(t *testing.T) {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
-	h := admin.New(users, pool, mgr)
+	h := admin.New(users, pool, mgr, testAuthConfig())
 	cookie, csrf := login(t, h, mgr, "admin", "secret")
 
 	vcf := strings.Join([]string{

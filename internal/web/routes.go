@@ -15,9 +15,7 @@ import (
 type Deps struct {
 	Store   *store.Store
 	Session *websession.Manager
-	// InsecureTokenAuth lets a device authenticate by its token as the Basic
-	// password. See auth.WithTokenPassword.
-	InsecureTokenAuth bool
+	Auth    auth.Config
 }
 
 // New wires the whole server. CardDAV serves at the root because webdavsvc's
@@ -26,10 +24,10 @@ type Deps struct {
 // both see their own routes after the prefix is chosen here.
 func New(d Deps) http.Handler {
 	users := store.NewUsers(d.Store.PG)
-	authOpts := []auth.Option{auth.WithTokenPassword(d.InsecureTokenAuth)}
-	dav := webdavsvc.New(users, d.Store.PG, authOpts...)
-	rest := api.New(users, d.Store.PG, authOpts...)
-	ui := admin.New(users, d.Store.PG, d.Session)
+	cfg := d.Auth
+	dav := webdavsvc.New(users, d.Store.PG, cfg.Gate(users, store.NewPrincipals(d.Store.PG)))
+	rest := api.New(users, d.Store.PG, cfg)
+	ui := admin.New(users, d.Store.PG, d.Session, cfg)
 	static := http.FileServer(http.Dir("assets"))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +56,7 @@ func New(d Deps) http.Handler {
 
 func isUIPath(p string) bool {
 	switch p {
-	case "/login", "/logout", "/dashboard":
+	case "/login", "/register", "/logout", "/dashboard":
 		return true
 	}
 	return strings.HasPrefix(p, "/dashboard/") || strings.HasPrefix(p, "/invite/")

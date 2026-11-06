@@ -28,7 +28,7 @@ func TestAdminLoginAndSession(t *testing.T) {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
-	h := admin.New(users, pool, mgr)
+	h := admin.New(users, pool, mgr, testAuthConfig())
 
 	if rec := do(h, "GET", "/login", nil, nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Sign in") {
 		t.Fatalf("GET /login = %d, body has Sign in: %v", rec.Code, strings.Contains(rec.Body.String(), "Sign in"))
@@ -80,7 +80,7 @@ func TestAdminBooks(t *testing.T) {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
-	h := admin.New(users, pool, mgr)
+	h := admin.New(users, pool, mgr, testAuthConfig())
 	cookie, csrf := login(t, h, mgr, "admin", "secret")
 
 	// The slug checker reports availability before the unique constraint fires.
@@ -131,7 +131,7 @@ func TestAdminDevices(t *testing.T) {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
-	h := admin.New(users, pool, mgr)
+	h := admin.New(users, pool, mgr, testAuthConfig())
 	cookie, csrf := login(t, h, mgr, "admin", "secret")
 
 	rec := do(h, "POST", "/dashboard/devices", url.Values{"csrf": {csrf}, "label": {"phone"}, "tier": {"primary"}}, cookie)
@@ -192,7 +192,7 @@ func TestAdminContacts(t *testing.T) {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
-	h := admin.New(users, pool, mgr)
+	h := admin.New(users, pool, mgr, testAuthConfig())
 	cookie, csrf := login(t, h, mgr, "admin", "secret")
 
 	do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}, "tiers": {"primary", "secondary"}}, cookie)
@@ -246,7 +246,7 @@ func TestAdminSettingsAndContactCreate(t *testing.T) {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
-	h := admin.New(users, pool, mgr)
+	h := admin.New(users, pool, mgr, testAuthConfig())
 	cookie, csrf := login(t, h, mgr, "admin", "secret")
 
 	// Point the default book at a freshly created one.
@@ -296,7 +296,7 @@ func TestAdminContactEdit(t *testing.T) {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
-	h := admin.New(users, pool, mgr)
+	h := admin.New(users, pool, mgr, testAuthConfig())
 	cookie, csrf := login(t, h, mgr, "admin", "secret")
 
 	var cid int64
@@ -365,7 +365,7 @@ func TestAdminSidebarOOB(t *testing.T) {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
-	h := admin.New(users, pool, mgr)
+	h := admin.New(users, pool, mgr, testAuthConfig())
 	cookie, _ := login(t, h, mgr, "admin", "secret")
 
 	// A fragment navigation returns the leaf plus an OOB refresh of the sidebar
@@ -391,7 +391,7 @@ func TestAdminPalette(t *testing.T) {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
-	h := admin.New(users, pool, mgr)
+	h := admin.New(users, pool, mgr, testAuthConfig())
 	cookie, csrf := login(t, h, mgr, "admin", "secret")
 
 	// The dashboard mounts the palette and its header trigger.
@@ -436,6 +436,45 @@ func TestAdminPalette(t *testing.T) {
 	rec = do(h, "GET", "/dashboard/palette?q=zzzznope", nil, cookie)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "No matches") {
 		t.Fatalf("no-match palette = %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminFirstAccountRegistration(t *testing.T) {
+	pool := testPool(t)
+	users := store.NewUsers(pool)
+	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
+	h := admin.New(users, pool, mgr, testAuthConfig())
+
+	// No accounts yet: sign-in sends the visitor to the registration form.
+	if rec := do(h, "GET", "/login", nil, nil); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/register" {
+		t.Fatalf("GET /login = %d %q, want 303 /register", rec.Code, rec.Header().Get("Location"))
+	}
+	if rec := do(h, "GET", "/register", nil, nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Create your account") {
+		t.Fatalf("GET /register = %d, body missing the form", rec.Code)
+	}
+
+	short := url.Values{"username": {"owner"}, "name": {"Owner"}, "email": {"owner@example.com"}, "password": {"short"}}
+	if rec := do(h, "POST", "/register", short, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("short password = %d, want 400", rec.Code)
+	}
+
+	good := url.Values{"username": {"owner"}, "name": {"Owner"}, "email": {"owner@example.com"}, "password": {"longenough"}}
+	rec := do(h, "POST", "/register", good, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("register = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	cookie := sessionCookie(t, rec)
+	if rec := do(h, "GET", "/dashboard", nil, cookie); rec.Code != http.StatusOK {
+		t.Fatalf("dashboard after register = %d, want 200", rec.Code)
+	}
+
+	// A second account cannot be created, and the form closes.
+	second := url.Values{"username": {"other"}, "name": {"Other"}, "email": {"other@example.com"}, "password": {"longenough"}}
+	if rec := do(h, "POST", "/register", second, nil); rec.Code != http.StatusConflict {
+		t.Fatalf("second register = %d, want 409", rec.Code)
+	}
+	if rec := do(h, "GET", "/register", nil, nil); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/login" {
+		t.Fatalf("GET /register after setup = %d %q, want 303 /login", rec.Code, rec.Header().Get("Location"))
 	}
 }
 
@@ -517,7 +556,7 @@ func TestAdminBulkContacts(t *testing.T) {
 		t.Fatalf("signup: %v", err)
 	}
 	mgr := websession.New("session", []byte("test-secret"), time.Hour, false, http.SameSiteLaxMode)
-	h := admin.New(users, pool, mgr)
+	h := admin.New(users, pool, mgr, testAuthConfig())
 	cookie, csrf := login(t, h, mgr, "admin", "secret")
 
 	do(h, "POST", "/dashboard/books", url.Values{"csrf": {csrf}, "slug": {"work"}, "display_name": {"Work"}, "tiers": {"primary", "secondary"}}, cookie)

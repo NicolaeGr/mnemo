@@ -66,7 +66,23 @@ go run ./cmd/server
 go run ./cmd/seed
 ```
 
-First boot creates an admin account (`admin@example.com` / `password`). Point a CardDAV client at the server root and sign in with it.
+There are no default accounts. On first boot, open the server and register the first account at `/register`. It becomes the owner and registration closes. Point a CardDAV client at the server root and sign in with it.
+
+To change a password later, run `server -set-password you`. It reads the new password from `NEW_PASSWORD`, or from stdin when that is unset.
+
+## Configuration
+
+| Variable             | Default                                               | Purpose                                                                |
+| -------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------- |
+| `ADDR`               | `:8080`                                               | Listen address                                                         |
+| `DATABASE_URL`       | built from `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE` | Postgres connection string                                             |
+| `SESSION_SECRET`     | random per start                                      | Signs the web session cookie. Set it, or sessions reset on restart     |
+| `COOKIE_SECURE`      | `false`                                               | Set `true` when the server is reached over HTTPS                       |
+| `TRUSTED_PROXIES`    | loopback                                              | CIDRs whose `X-Forwarded-For` is honoured. Add your reverse proxy here |
+| `AUTH_FAILURE_LIMIT` | `20`                                                  | Credential failures per client address per minute, on each plane       |
+| `DAV_TOKEN_PASSWORD` | `false`                                               | Let a DAV client send its device token as the Basic password           |
+
+The DAV plane, the REST API, and the admin UI each keep their own auth failure counter, so a device retrying a stale token cannot lock the web UI out.
 
 ## Where it's going
 

@@ -34,13 +34,14 @@ func TestTokenAsBasicPassword(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	strict := httptest.NewServer(auth.RequireDAV(users, store.NewPrincipals(pool), next))
+	principals := store.NewPrincipals(pool)
+	strict := httptest.NewServer(auth.Config{}.Gate(users, principals).DAV(next))
 	defer strict.Close()
 	if code := basicProbe(t, strict, "whatever", token); code != http.StatusUnauthorized {
 		t.Fatalf("strict token-as-password = %d, want 401", code)
 	}
 
-	open := httptest.NewServer(auth.RequireDAV(users, store.NewPrincipals(pool), next, auth.WithTokenPassword(true)))
+	open := httptest.NewServer(auth.Config{TokenPassword: true}.Gate(users, principals).DAV(next))
 	defer open.Close()
 	if code := basicProbe(t, open, "whatever", token); code != http.StatusOK {
 		t.Fatalf("enabled token-as-password = %d, want 200", code)
@@ -71,6 +72,53 @@ func basicProbe(t *testing.T, ts *httptest.Server, user, pass string) int {
 		t.Fatalf("req: %v", err)
 	}
 	req.SetBasicAuth(user, pass)
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode
+}
+
+// TestRequireAccount pins the REST plane policy: account credentials work,
+// device tokens do not, whether sent as Bearer or as the Basic password.
+func TestRequireAccount(t *testing.T) {
+	pool := resetPool(t)
+	ctx := context.Background()
+	users := store.NewUsers(pool)
+	u, err := users.Signup(ctx, "acctuser", "acct@example.com", "Acct", "pw", 4)
+	if err != nil {
+		t.Fatalf("signup: %v", err)
+	}
+	_, token, err := store.NewPrincipals(pool).IssueToken(ctx, u.ID, "primary", "phone")
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	ts := httptest.NewServer(auth.Config{}.Gate(users, nil).Account(next))
+	defer ts.Close()
+
+	if code := bearerProbe(t, ts, token); code != http.StatusUnauthorized {
+		t.Fatalf("bearer on account plane = %d, want 401", code)
+	}
+	if code := basicProbe(t, ts, "whatever", token); code != http.StatusUnauthorized {
+		t.Fatalf("token-as-password on account plane = %d, want 401", code)
+	}
+	if code := basicProbe(t, ts, "acctuser", "pw"); code != http.StatusOK {
+		t.Fatalf("account password on account plane = %d, want 200", code)
+	}
+}
+
+func bearerProbe(t *testing.T, ts *httptest.Server, token string) int {
+	t.Helper()
+	req, err := http.NewRequest("GET", ts.URL, nil)
+	if err != nil {
+		t.Fatalf("req: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := ts.Client().Do(req)
 	if err != nil {
 		t.Fatalf("do: %v", err)

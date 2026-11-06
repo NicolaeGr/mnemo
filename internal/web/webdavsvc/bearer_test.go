@@ -26,7 +26,7 @@ func TestBearerPrincipalAuth(t *testing.T) {
 		t.Fatalf("issue token: %v", err)
 	}
 
-	ts := httptest.NewServer(webdavsvc.New(users, pool))
+	ts := httptest.NewServer(webdavsvc.New(users, pool, testGate(users, pool)))
 	defer ts.Close()
 	principal := "/carddav/" + testUsername + "/"
 

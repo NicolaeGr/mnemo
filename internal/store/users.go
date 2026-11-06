@@ -33,7 +33,7 @@ func (u *Users) ByLogin(ctx context.Context, identifier string) (User, error) {
 	row := u.pool.QueryRow(ctx,
 		`SELECT id, username, email, name, password_hash, created_at
 		   FROM users
-		  WHERE username = $1 OR email ILIKE $1`, identifier,
+		  WHERE username = $1 OR lower(email) = lower($1)`, identifier,
 	)
 	return scanUser(row)
 }
@@ -84,8 +84,91 @@ func (u *Users) DefaultBook(ctx context.Context, userID int64) (*int64, error) {
 	return id, err
 }
 
+// NeedsSetup reports whether the server has no accounts yet.
+func (u *Users) NeedsSetup(ctx context.Context) (bool, error) {
+	var exists bool
+	err := u.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users)`).Scan(&exists)
+	return !exists, err
+}
+
+// firstAccountLock serializes concurrent setup requests, so only one account can
+// win the empty-table race.
+const firstAccountLock = int64(0x6d6e656d6f)
+
+// RegisterFirst creates the first account and rejects the call once any user
+// exists. Unknown state is model.ErrConflict.
+func (u *Users) RegisterFirst(ctx context.Context, username, email, name, password string, bcryptCost int) (User, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	if err != nil {
+		return User{}, err
+	}
+
+	var user User
+	err = pgx.BeginFunc(ctx, u.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, firstAccountLock); err != nil {
+			return err
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users)`).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return model.ErrConflict
+		}
+		err := tx.QueryRow(ctx, `
+			INSERT INTO users (username, email, name, password_hash)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id, username, email, name, password_hash, created_at`,
+			username, email, name, string(hash),
+		).Scan(&user.ID, &user.Username, &user.Email, &user.Name, &user.PasswordHash, &user.CreatedAt)
+		if err != nil {
+			return mapSignupError(err)
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO user_settings (user_id) VALUES ($1)`, user.ID)
+		return err
+	})
+	return user, err
+}
+
 func CheckPassword(user User, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) == nil
+}
+
+// dummyHash gives the not-found path the same cost as a real comparison, so
+// response time does not reveal whether a login exists.
+var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("mnemo-dummy-password"), 12)
+
+// Authenticate verifies a login and password pair. Accounts are matched by
+// username or email, case-insensitively for the email.
+func (u *Users) Authenticate(ctx context.Context, login, password string) (User, bool) {
+	user, err := u.ByLogin(ctx, login)
+	if err != nil {
+		bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
+		return User{}, false
+	}
+	if !CheckPassword(user, password) {
+		return User{}, false
+	}
+	return user, true
+}
+
+// SetPassword stores a new password hash for the account matching login.
+// Unknown login is model.ErrNotFound.
+func (u *Users) SetPassword(ctx context.Context, login, password string, bcryptCost int) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	if err != nil {
+		return err
+	}
+	tag, err := u.pool.Exec(ctx,
+		`UPDATE users SET password_hash = $2 WHERE username = $1 OR lower(email) = lower($1)`,
+		login, string(hash))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return model.ErrNotFound
+	}
+	return nil
 }
 
 func scanUser(row pgx.Row) (User, error) {

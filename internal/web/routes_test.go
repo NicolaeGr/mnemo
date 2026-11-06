@@ -44,14 +44,22 @@ func TestRouterServesUIAndAPI(t *testing.T) {
 		t.Fatalf("GET /dashboard = %d %q, want 303 /login", rec.Code, rec.Header().Get("Location"))
 	}
 
-	// The REST API keeps working under the same router.
+	// The REST API keeps working under the same router, with account credentials.
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/v1/users",
-		strings.NewReader(`{"username":"anon","email":"anon@example.com","name":"A","password":"pw"}`))
+	req := httptest.NewRequest("GET", "/api/v1/me", nil)
+	req.SetBasicAuth("ruser", "pw")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/me = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	// Anonymous account creation is closed once the server has an account.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/v1/users", strings.NewReader(`{"username":"anon","email":"anon@example.com","name":"A","password":"password123"}`))
 	req.Header.Set("Content-Type", "application/json")
 	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("POST /api/v1/users = %d, want 201: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("POST /api/v1/users = %d, want 401", rec.Code)
 	}
 }
 

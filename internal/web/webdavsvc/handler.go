@@ -19,7 +19,7 @@ import (
 // backend; the library derives resource type from PATH DEPTH relative to Prefix,
 // so the principal mount lives at /carddav/{username}/ (depth 1) with the
 // address-book home set one level below (see backend.go).
-func New(users *store.Users, pool *pgxpool.Pool, opts ...auth.Option) http.Handler {
+func New(users *store.Users, pool *pgxpool.Pool, gate *auth.Gate) http.Handler {
 	mux := http.NewServeMux()
 	b := &backend{users: users, pool: pool}
 
@@ -28,5 +28,5 @@ func New(users *store.Users, pool *pgxpool.Pool, opts ...auth.Option) http.Handl
 	// Principal + home-set + address-book + objects.
 	mux.Handle(prefix+"/", &carddav.Handler{Backend: b, Prefix: prefix})
 
-	return auth.RequireDAV(users, store.NewPrincipals(pool), &davFilter{next: mux, b: b}, opts...)
+	return gate.DAV(&davFilter{next: mux, b: b})
 }

@@ -26,7 +26,7 @@ func TestAPI(t *testing.T) {
 		t.Fatalf("signup: %v", err)
 	}
 
-	ts := httptest.NewServer(api.New(users, pool))
+	ts := httptest.NewServer(api.New(users, pool, testAuthConfig()))
 	defer ts.Close()
 	base := ts.URL
 
@@ -100,8 +100,10 @@ func TestAPI(t *testing.T) {
 		t.Fatalf("delete contact = %d, want 204", resp.Code)
 	}
 
-	if resp := call(t, ts, "GET", base+"/books", "Bearer "+tokenOut.Token, ""); resp.Code != http.StatusOK {
-		t.Fatalf("bearer books = %d, want 200", resp.Code)
+	// Device tokens are scoped to the DAV plane; the REST API takes account
+	// credentials only.
+	if resp := call(t, ts, "GET", base+"/books", "Bearer "+tokenOut.Token, ""); resp.Code != http.StatusUnauthorized {
+		t.Fatalf("bearer books = %d, want 401", resp.Code)
 	}
 
 	// A device can be renamed, and revoking it kills its token.
@@ -162,7 +164,7 @@ func TestContactCreateUpdate(t *testing.T) {
 	if _, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
-	ts := httptest.NewServer(api.New(users, pool))
+	ts := httptest.NewServer(api.New(users, pool, testAuthConfig()))
 	defer ts.Close()
 	base := ts.URL
 
@@ -209,7 +211,7 @@ func TestContactStructuredInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("signup: %v", err)
 	}
-	ts := httptest.NewServer(api.New(users, pool))
+	ts := httptest.NewServer(api.New(users, pool, testAuthConfig()))
 	defer ts.Close()
 	base := ts.URL
 
@@ -293,7 +295,7 @@ func TestAccountEndpoints(t *testing.T) {
 	if _, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
-	ts := httptest.NewServer(api.New(users, pool))
+	ts := httptest.NewServer(api.New(users, pool, testAuthConfig()))
 	defer ts.Close()
 	base := ts.URL
 
@@ -320,25 +322,8 @@ func TestAccountEndpoints(t *testing.T) {
 		t.Fatalf("PATCH /me/settings = %d, want 204", resp.Code)
 	}
 
-	// Signup is anonymous, then the new user can log in.
-	signup := anonRequest(t, ts, "POST", base+"/users", `{"username":"newbie","email":"newbie@example.com","name":"New","password":"secret"}`)
-	if signup.Code != http.StatusCreated {
-		t.Fatalf("signup = %d, want 201: %s", signup.Code, signup.Body.String())
-	}
-	if dup := anonRequest(t, ts, "POST", base+"/users", `{"username":"newbie","email":"newbie@example.com","name":"New","password":"secret"}`); dup.Code != http.StatusConflict {
-		t.Fatalf("duplicate signup = %d, want 409", dup.Code)
-	}
-	if bad := anonRequest(t, ts, "POST", base+"/users", `{"username":"Bad_User","email":"bad@example.com","name":"Bad","password":"secret"}`); bad.Code != http.StatusBadRequest {
-		t.Fatalf("bad-username signup = %d, want 400", bad.Code)
-	}
-
-	req, _ := http.NewRequest("GET", base+"/me", nil)
-	req.SetBasicAuth("newbie", "secret")
-	rec := httptest.NewRecorder()
-	ts.Config.Handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("newbie /me = %d, want 200", rec.Code)
-	}
+	// A second device cannot be created anonymously: signup is web-only and
+	// first-run only.
 }
 
 func TestBookDescriptionAndSearchFilter(t *testing.T) {
@@ -348,7 +333,7 @@ func TestBookDescriptionAndSearchFilter(t *testing.T) {
 	if _, err := users.Signup(ctx, "apiuser", "api@example.com", "API", "pw", 4); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
-	ts := httptest.NewServer(api.New(users, pool))
+	ts := httptest.NewServer(api.New(users, pool, testAuthConfig()))
 	defer ts.Close()
 	base := ts.URL
 
@@ -428,18 +413,6 @@ func TestBookDescriptionAndSearchFilter(t *testing.T) {
 	if ids := search(beta); len(ids) != 1 || ids[0] != cb {
 		t.Fatalf("search beta = %v, want [%d]", ids, cb)
 	}
-}
-
-func anonRequest(t *testing.T, ts *httptest.Server, method, url, body string) *httptest.ResponseRecorder {
-	t.Helper()
-	req, err := http.NewRequest(method, url, bytes.NewBufferString(body))
-	if err != nil {
-		t.Fatalf("req: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	ts.Config.Handler.ServeHTTP(rec, req)
-	return rec
 }
 
 func resetPool(t *testing.T) *pgxpool.Pool {

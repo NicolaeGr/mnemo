@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,19 +40,30 @@ import (
 )
 
 type Admin struct {
-	users   *store.Users
-	pool    *pgxpool.Pool
-	session *websession.Manager
+	users    *store.Users
+	pool     *pgxpool.Pool
+	session  *websession.Manager
+	ips      *auth.ClientIPs
+	failures *auth.Limiter
 }
+
+// registerBcryptCost matches the cost the REST signup used.
+const registerBcryptCost = 12
+
+// usernameShape mirrors the users.username check constraint.
+var usernameShape = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,63}$`)
 
 // New builds the admin handler. Paths are absolute (/login, /dashboard, …) and
 // the root router sends matching requests here.
-func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager) http.Handler {
-	a := &Admin{users: users, pool: pool, session: session}
+func New(users *store.Users, pool *pgxpool.Pool, session *websession.Manager, authCfg auth.Config) http.Handler {
+	failures, ips := authCfg.Guard(0, time.Minute)
+	a := &Admin{users: users, pool: pool, session: session, ips: ips, failures: failures}
 	mux := http.NewServeMux()
 
 	mux.Handle("GET /login", a.authStack(http.HandlerFunc(a.loginPage)))
 	mux.Handle("POST /login", http.HandlerFunc(a.loginSubmit))
+	mux.Handle("GET /register", a.authStack(http.HandlerFunc(a.registerPage)))
+	mux.Handle("POST /register", http.HandlerFunc(a.registerSubmit))
 	mux.Handle("GET /invite/{token}", a.authStack(http.HandlerFunc(a.inviteLanding)))
 	mux.Handle("POST /logout", a.mutate(http.HandlerFunc(a.logout)))
 	mux.Handle("GET /dashboard/modal/close", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -157,15 +169,33 @@ func (a *Admin) modal(leaf func(r *http.Request) (string, templ.Component)) http
 }
 
 func (a *Admin) loginPage(w http.ResponseWriter, r *http.Request) {
+	if setup, err := a.users.NeedsSetup(r.Context()); err == nil && setup {
+		http.Redirect(w, r, "/register", http.StatusSeeOther)
+		return
+	}
 	seg.Page(w, r, "Sign in", pages.Login())
 }
 
-// loginSubmit verifies credentials and issues the session cookie. The login
-// form posts via fetch and navigates on 200.
-func (a *Admin) loginSubmit(w http.ResponseWriter, r *http.Request) {
-	ip := auth.ClientIP(r)
+// registerPage serves the first-run form and closes once an account exists.
+func (a *Admin) registerPage(w http.ResponseWriter, r *http.Request) {
+	setup, err := a.users.NeedsSetup(r.Context())
+	if err != nil {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+	if !setup {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	seg.Page(w, r, "Create account", pages.Register())
+}
+
+// registerSubmit creates the first account, signs it in, and never creates a
+// second one.
+func (a *Admin) registerSubmit(w http.ResponseWriter, r *http.Request) {
+	ip := a.ips.From(r)
 	now := time.Now()
-	if !auth.AllowAuthAttempt(ip, now) {
+	if !a.failures.Allow(ip, now) {
 		w.Header().Set("Retry-After", "60")
 		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 		return
@@ -174,13 +204,66 @@ func (a *Admin) loginSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
-	u, err := a.users.ByLogin(r.Context(), r.FormValue("username"))
-	if err != nil || !store.CheckPassword(u, r.FormValue("password")) {
-		auth.NoteAuthFailure(ip, now)
+	username := strings.TrimSpace(r.FormValue("username"))
+	email := strings.TrimSpace(r.FormValue("email"))
+	name := strings.TrimSpace(r.FormValue("name"))
+	password := r.FormValue("password")
+
+	switch {
+	case !usernameShape.MatchString(username):
+		http.Error(w, "Username must be 2 to 64 lowercase letters, digits, or dashes.", http.StatusBadRequest)
+		return
+	case name == "":
+		http.Error(w, "Enter a name.", http.StatusBadRequest)
+		return
+	case !strings.Contains(email, "@") || strings.ContainsAny(email, " \t"):
+		http.Error(w, "Enter an email address.", http.StatusBadRequest)
+		return
+	case len(password) < auth.MinPasswordLength:
+		http.Error(w, fmt.Sprintf("Password must be at least %d characters.", auth.MinPasswordLength), http.StatusBadRequest)
+		return
+	}
+
+	u, err := a.users.RegisterFirst(r.Context(), username, email, name, password, registerBcryptCost)
+	if err != nil {
+		if errors.Is(err, model.ErrConflict) {
+			a.failures.Fail(ip, now)
+			http.Error(w, "An account already exists. Sign in instead.", http.StatusConflict)
+			return
+		}
+		a.failures.Fail(ip, now)
+		http.Error(w, "Could not create the account: "+errorText(err), http.StatusBadRequest)
+		return
+	}
+	a.failures.Clear(ip)
+	if _, err := a.session.Issue(w, u.ID); err != nil {
+		http.Error(w, "session error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// loginSubmit verifies credentials and issues the session cookie. The login
+// form posts via fetch and navigates on 200.
+func (a *Admin) loginSubmit(w http.ResponseWriter, r *http.Request) {
+	ip := a.ips.From(r)
+	now := time.Now()
+	if !a.failures.Allow(ip, now) {
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	u, ok := a.users.Authenticate(r.Context(), r.FormValue("username"), r.FormValue("password"))
+	if !ok {
+		a.failures.Fail(ip, now)
 		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
 		return
 	}
-	auth.ClearAuthFailures(ip)
+	a.failures.Clear(ip)
 	if _, err := a.session.Issue(w, u.ID); err != nil {
 		http.Error(w, "session error", http.StatusInternalServerError)
 		return

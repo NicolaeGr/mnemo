@@ -64,7 +64,7 @@ func TestTierFlipChangesDeviceViewAndCtag(t *testing.T) {
 		t.Fatalf("tag work card: %v", err)
 	}
 
-	ts := httptest.NewServer(webdavsvc.New(users, pool))
+	ts := httptest.NewServer(webdavsvc.New(users, pool, testGate(users, pool)))
 	defer ts.Close()
 	client, err := carddav.NewClient(bearerHTTPClient(authz), ts.URL)
 	if err != nil {

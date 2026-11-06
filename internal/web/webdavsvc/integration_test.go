@@ -242,7 +242,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		t.Fatalf("signup: %v", err)
 	}
 
-	handler := webdavsvc.New(users, pool)
+	handler := webdavsvc.New(users, pool, testGate(users, pool))
 	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
 	t.Cleanup(pool.Close)
