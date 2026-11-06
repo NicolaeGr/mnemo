@@ -57,6 +57,11 @@
 
             modules = ./gomod2nix.toml;
 
+            postInstall = ''
+              mkdir -p $out/share/mnemo
+              cp -r ${./assets} $out/share/mnemo/assets
+            '';
+
             nativeCheckInputs = [ pkgs.postgresql ];
 
             preCheck = ''
